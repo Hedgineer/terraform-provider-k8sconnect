@@ -28,7 +28,7 @@ var (
 
 // ExtractRunnableExamples parses a markdown file and extracts all runnable examples
 func ExtractRunnableExamples(filepath string) ([]RunnableExample, error) {
-	file, err := os.Open(filepath)
+	file, err := os.Open(filepath) // #nosec G304 -- test helper, reads doc files for example extraction
 	if err != nil {
 		return nil, fmt.Errorf("failed to open %s: %w", filepath, err)
 	}
