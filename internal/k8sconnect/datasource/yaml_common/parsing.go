@@ -171,7 +171,7 @@ func ExpandPattern(pattern string) ([]string, error) {
 
 // ReadFile reads a file and returns its content as string
 func ReadFile(path string) (string, error) {
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(path) // #nosec G304 -- reads user-specified YAML files for the data source
 	if err != nil {
 		return "", fmt.Errorf("failed to read file %q: %w", path, err)
 	}
@@ -269,11 +269,11 @@ func BuildKustomization(path string) (yamlContent string, warnings []string, err
 	resMap, buildErr := k.Run(filesys.MakeFsOnDisk(), path)
 
 	// Restore stderr and capture warnings
-	w.Close()
+	_ = w.Close() // #nosec G104 -- best-effort pipe cleanup; build result is what matters
 	os.Stderr = oldStderr
 	var stderrBuf bytes.Buffer
-	io.Copy(&stderrBuf, r)
-	r.Close()
+	_, _ = io.Copy(&stderrBuf, r) // #nosec G104 -- best-effort stderr capture
+	_ = r.Close()                 // #nosec G104 -- best-effort pipe cleanup
 
 	if buildErr != nil {
 		return "", nil, buildErr

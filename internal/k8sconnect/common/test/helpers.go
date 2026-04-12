@@ -758,13 +758,13 @@ metadata:
 
 	// Write to temp file
 	tmpfile := fmt.Sprintf("/tmp/kubectl-cm-%s.yaml", name)
-	if err := os.WriteFile(tmpfile, []byte(yaml), 0644); err != nil {
+	if err := os.WriteFile(tmpfile, []byte(yaml), 0600); err != nil { // #nosec G306
 		t.Fatalf("Failed to write temp file for kubectl: %v", err)
 	}
 	defer os.Remove(tmpfile)
 
 	// Apply with kubectl
-	cmd := exec.Command("kubectl", "apply", "-f", tmpfile)
+	cmd := exec.Command("kubectl", "apply", "-f", tmpfile) // #nosec G204 -- test helper, args are test-controlled
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("kubectl apply failed: %v\nOutput: %s", err, output)
@@ -790,7 +790,7 @@ func DeleteResourceWithKubectl(t *testing.T, kubeconfigRaw, resourceType, name, 
 	}
 	args = append(args, "--ignore-not-found=true")
 
-	cmd := exec.Command("kubectl", args...)
+	cmd := exec.Command("kubectl", args...) // #nosec G204 -- test helper, args are test-controlled
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("kubectl delete failed: %v\nOutput: %s", err, output)
@@ -888,7 +888,7 @@ func CheckHasAnnotation(client kubernetes.Interface, namespace, kind, name, anno
 // ScaleDeploymentWithKubectl scales a deployment using kubectl scale command
 // This simulates external drift (kubectl changes replicas with client-side apply manager)
 func ScaleDeploymentWithKubectl(t *testing.T, namespace, name string, replicas int) {
-	cmd := exec.Command("kubectl", "scale", "deployment", name, "-n", namespace, fmt.Sprintf("--replicas=%d", replicas))
+	cmd := exec.Command("kubectl", "scale", "deployment", name, "-n", namespace, fmt.Sprintf("--replicas=%d", replicas)) // #nosec G204 -- test helper, args are test-controlled
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("kubectl scale failed: %v\nOutput: %s", err, output)
@@ -906,7 +906,7 @@ func CheckDeploymentReplicas(client kubernetes.Interface, namespace, name string
 			return fmt.Errorf("failed to get deployment %s/%s: %v", namespace, name, err)
 		}
 
-		actualReplicas := int32(expectedReplicas)
+		actualReplicas := int32(expectedReplicas) // #nosec G115 -- test helper, replica counts are small integers
 		if deployment.Spec.Replicas == nil || *deployment.Spec.Replicas != actualReplicas {
 			return fmt.Errorf("deployment %s/%s expected %d replicas, got %v",
 				namespace, name, expectedReplicas, deployment.Spec.Replicas)

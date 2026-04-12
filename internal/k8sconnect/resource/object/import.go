@@ -46,7 +46,7 @@ func (r *objectResource) loadKubeconfig(ctx context.Context, resp *resource.Impo
 	})
 
 	// Check if kubeconfig file exists
-	if _, err := os.Stat(kubeconfigPath); os.IsNotExist(err) {
+	if _, err := os.Stat(kubeconfigPath); os.IsNotExist(err) { // #nosec G304,G703 -- path from user-controlled KUBECONFIG env var, same as kubectl
 		resp.Diagnostics.AddError(
 			"Import Failed: Kubeconfig File Not Found",
 			fmt.Sprintf("Kubeconfig file not found at: %s\n\n"+
@@ -58,7 +58,7 @@ func (r *objectResource) loadKubeconfig(ctx context.Context, resp *resource.Impo
 	}
 
 	// Read the kubeconfig file contents
-	kubeconfigData, err := os.ReadFile(kubeconfigPath)
+	kubeconfigData, err := os.ReadFile(kubeconfigPath) // #nosec G304,G703 -- path from user-controlled KUBECONFIG env var, same as kubectl
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Import Failed: Cannot Read Kubeconfig",

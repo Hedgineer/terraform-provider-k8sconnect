@@ -134,8 +134,8 @@ func AssertPlanExitCode(t *testing.T, output *TerraformOutput, expectedCode int)
 // WriteTestFile writes a .tf file to the test directory
 func WriteTestFile(t *testing.T, dir, filename, content string) {
 	t.Helper()
-	path := filepath.Join(dir, filename)
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	path := filepath.Join(dir, filename)                         // #nosec G304 -- test helper, dir is from t.TempDir()
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil { // #nosec G306,G703 -- test helper, path from t.TempDir()
 		t.Fatalf("Failed to write %s: %v", filename, err)
 	}
 }
@@ -177,12 +177,12 @@ func CreateKubectlResource(t *testing.T, yamlContent string) {
 
 	// Write to temp file
 	tmpfile := filepath.Join(t.TempDir(), "kubectl-resource.yaml")
-	if err := os.WriteFile(tmpfile, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(tmpfile, []byte(yamlContent), 0600); err != nil { // #nosec G306
 		t.Fatalf("Failed to write kubectl yaml: %v", err)
 	}
 
 	// Apply with kubectl
-	cmd := exec.Command("kubectl", "apply", "-f", tmpfile)
+	cmd := exec.Command("kubectl", "apply", "-f", tmpfile) // #nosec G204 -- test helper
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("kubectl apply failed: %v\nOutput:\n%s", err, output)
@@ -200,7 +200,7 @@ func DeleteKubectlResource(t *testing.T, kind, name, namespace string) {
 		args = append(args, "-n", namespace)
 	}
 
-	cmd := exec.Command("kubectl", args...)
+	cmd := exec.Command("kubectl", args...) // #nosec G204 -- test helper
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Logf("kubectl delete warning (non-fatal): %v\nOutput:\n%s", err, output)
@@ -222,7 +222,7 @@ func RunKubectlCommand(t *testing.T, command string) {
 		t.Fatalf("Command must start with 'kubectl', got: %s", parts[0])
 	}
 
-	cmd := exec.Command(parts[0], parts[1:]...)
+	cmd := exec.Command(parts[0], parts[1:]...) // #nosec G204 -- test helper, command is validated above
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("kubectl command failed: %v\nCommand: %s\nOutput:\n%s", err, command, output)
