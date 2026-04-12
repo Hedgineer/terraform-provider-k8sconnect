@@ -134,8 +134,8 @@ func AssertPlanExitCode(t *testing.T, output *TerraformOutput, expectedCode int)
 // WriteTestFile writes a .tf file to the test directory
 func WriteTestFile(t *testing.T, dir, filename, content string) {
 	t.Helper()
-	path := filepath.Join(dir, filename)                         // #nosec G304 -- test helper, dir is from t.TempDir()
-	if err := os.WriteFile(path, []byte(content), 0600); err != nil { // #nosec G306,G703 -- test helper, path from t.TempDir()
+	path := filepath.Join(dir, filename)                              // #nosec G304 -- test helper, dir is from t.TempDir()
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil { // #nosec G306,G703
 		t.Fatalf("Failed to write %s: %v", filename, err)
 	}
 }
