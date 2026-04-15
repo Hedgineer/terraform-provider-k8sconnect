@@ -1,9 +1,9 @@
-name: Release
+name: Release (upstream - disabled)
 
+# Upstream release workflow (GPG-signed → Terraform Registry).
+# Tag trigger removed to prevent accidental runs on this fork.
+# Hedgineer releases use hedgineer-release.yml with hed-v* tags.
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       dry_run:
