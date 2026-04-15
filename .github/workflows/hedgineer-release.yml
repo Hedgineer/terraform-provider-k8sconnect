@@ -56,9 +56,10 @@ jobs:
         with:
           version: latest
           args: >-
-            release --clean --skip=publish,sign,validate,changelog
+            release --clean --skip=publish,sign,validate
             ${{ github.event_name == 'workflow_dispatch' && '--snapshot' || '' }}
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: v${{ steps.version.outputs.version }}
 
       - name: Setup ORAS
