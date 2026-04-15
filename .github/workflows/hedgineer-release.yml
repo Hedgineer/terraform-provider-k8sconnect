@@ -1,0 +1,131 @@
+name: Hedgineer Release
+
+# Builds provider binaries and publishes as OCI artifacts to ACR.
+# Uses a separate tag namespace (hed-v*) to avoid clashes with upstream v* tags.
+#
+# Prerequisites (one-time manual setup):
+#   1. Create GitHub environment "release" in repo settings
+#   2. Add environment variables: AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
+#   3. Create Azure managed identity with AcrPush on hedgineercicdacr
+#   4. Configure OIDC federation: repo:Hedgineer/terraform-provider-k8sconnect:environment:release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build only — skip ACR push'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'hed-v')
+    environment: ${{ github.event_name == 'release' && 'release' || '' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "${TAG}" == hed-v* ]]; then
+            VERSION="${TAG#hed-v}"
+          else
+            VERSION="0.0.0-dev"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "version_tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building version: ${VERSION} (from tag: ${TAG})"
+
+      - name: Build with GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: latest
+          args: >-
+            release --clean --skip=publish,sign
+            ${{ github.event_name == 'workflow_dispatch' && '--snapshot' || '' }}
+        env:
+          GORELEASER_CURRENT_TAG: v${{ steps.version.outputs.version }}
+
+      - name: Setup ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Build OCI layout
+        if: github.event_name == 'release'
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ steps.version.outputs.version }}"
+          PROJECT="terraform-provider-k8sconnect"
+          LAYOUT="oci-layout"
+          PLATFORMS=("darwin/amd64" "linux/amd64" "windows/amd64")
+          TAGS=()
+
+          for PLATFORM in "${PLATFORMS[@]}"; do
+            OS="${PLATFORM%/*}"
+            ARCH="${PLATFORM#*/}"
+            TAG="${OS}_${ARCH}"
+            ZIP="dist/${PROJECT}_${VERSION}_${OS}_${ARCH}.zip"
+
+            if [[ ! -f "${ZIP}" ]]; then
+              echo "ERROR: Expected artifact not found: ${ZIP}"
+              ls -la dist/
+              exit 1
+            fi
+
+            echo "Pushing ${ZIP} as ${TAG}..."
+            oras push \
+              --artifact-type application/vnd.opentofu.provider-target \
+              --artifact-platform "${PLATFORM}" \
+              --oci-layout "${LAYOUT}:${TAG}" \
+              "${ZIP}:archive/zip"
+
+            TAGS+=("${TAG}")
+          done
+
+          echo "Creating OCI index manifest..."
+          oras manifest index create \
+            --artifact-type="application/vnd.opentofu.provider" \
+            --oci-layout "${LAYOUT}:${VERSION}" \
+            "${TAGS[@]}"
+
+      - name: Azure OIDC Login
+        if: github.event_name == 'release'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Push to ACR
+        if: github.event_name == 'release'
+        run: |
+          set -euo pipefail
+
+          az acr login --name hedgineercicdacr
+
+          VERSION="${{ steps.version.outputs.version }}"
+          REGISTRY="hedgineercicdacr.azurecr.io"
+          REPO="opentofu-providers/hedgineer/k8sconnect"
+
+          echo "Pushing to ${REGISTRY}/${REPO}:${VERSION}..."
+          oras cp \
+            --from-oci-layout "oci-layout:${VERSION}" \
+            "${REGISTRY}/${REPO}:${VERSION}"
+
+          echo "Published: ${REGISTRY}/${REPO}:${VERSION}"
+
