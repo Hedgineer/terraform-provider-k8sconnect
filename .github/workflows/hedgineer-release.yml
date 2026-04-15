@@ -30,8 +30,6 @@ jobs:
     environment: ${{ github.event_name == 'release' && 'release' || '' }}
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-go@v6
         with:
@@ -48,19 +46,35 @@ jobs:
             VERSION="0.0.0-dev"
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "version_tag=v${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Building version: ${VERSION} (from tag: ${TAG})"
 
-      - name: Build with GoReleaser
-        uses: goreleaser/goreleaser-action@v7
-        with:
-          version: latest
-          args: >-
-            release --clean --skip=publish,sign,validate
-            ${{ github.event_name == 'workflow_dispatch' && '--snapshot' || '' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GORELEASER_CURRENT_TAG: v${{ steps.version.outputs.version }}
+      - name: Build and package
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ steps.version.outputs.version }}"
+          PROJECT="terraform-provider-k8sconnect"
+          PLATFORMS=("darwin/amd64" "linux/amd64" "windows/amd64")
+
+          mkdir -p dist
+          for PLATFORM in "${PLATFORMS[@]}"; do
+            OS="${PLATFORM%/*}"
+            ARCH="${PLATFORM#*/}"
+            BINARY="${PROJECT}_v${VERSION}"
+            [[ "$OS" == "windows" ]] && BINARY="${BINARY}.exe"
+            ZIP="${PROJECT}_${VERSION}_${OS}_${ARCH}.zip"
+
+            echo "Building ${OS}/${ARCH}..."
+            CGO_ENABLED=0 GOOS="$OS" GOARCH="$ARCH" go build \
+              -trimpath \
+              -ldflags="-s -w -X github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect.version=${VERSION}" \
+              -o "dist/${BINARY}" .
+
+            echo "Packaging ${ZIP}..."
+            (cd dist && zip "${ZIP}" "${BINARY}" && rm "${BINARY}")
+          done
+
+          ls -lh dist/
 
       - name: Setup ORAS
         uses: oras-project/setup-oras@v1
