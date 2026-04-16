@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	sigsyaml "sigs.k8s.io/yaml"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 )
@@ -17,17 +18,28 @@ import (
 type ManagedFields = fieldmanagement.ManagedFields
 
 // updateManagedFieldsData updates the managed_fields attribute in the resource model
-// It extracts, filters, flattens, and sets ownership data for clean UX
-// NOTE: This function does NOT filter out ignore_fields from managed_fields.
-// Users need visibility into who owns ignored fields. Filtering only status fields
-// ensures consistency between plan and apply phases.
-func updateManagedFieldsData(ctx context.Context, data *objectResourceModel, currentObj *unstructured.Unstructured) {
+// for fields that are in scope: paths currently owned by k8sconnect, paths previously
+// owned by k8sconnect (from the ADR-021 baseline), and paths present in yaml_body.
+// Fields written by other controllers outside this scope are excluded to prevent
+// "Provider produced inconsistent result after apply" errors when external controllers
+// write unrelated fields between plan and apply (see ADR-024).
+//
+// Status fields and K8s system annotations are filtered within the scope as well
+// (they are excluded regardless of ownership because they change unpredictably).
+func updateManagedFieldsData(ctx context.Context, data *objectResourceModel, currentObj *unstructured.Unstructured, yamlBody string, baseline map[string]string) {
 	// Extract ALL field ownership (map[string][]string)
 	ownership := fieldmanagement.ExtractAllManagedFields(currentObj)
 
-	// Filter out unwanted fields
+	// Compute the set of paths we consider relevant for managed_fields
+	relevantPaths := computeRelevantManagedFieldPaths(yamlBody, baseline, ownership)
+
+	// Filter ownership down to the relevant scope, applying status/system-annotation filters
 	filteredOwnership := make(map[string][]string)
 	for path, managers := range ownership {
+		if !relevantPaths[path] {
+			continue
+		}
+
 		// Skip status fields - they're always owned by controllers and provide no actionable information
 		if strings.HasPrefix(path, "status.") || path == "status" {
 			continue
@@ -57,6 +69,66 @@ func updateManagedFieldsData(ctx context.Context, data *objectResourceModel, cur
 	} else {
 		data.ManagedFields = mapValue
 	}
+}
+
+// computeRelevantManagedFieldPaths returns the union of paths considered in scope for
+// managed_fields tracking (ADR-024):
+//  1. Paths currently owned by k8sconnect (from the live ownership map)
+//  2. Paths previously owned by k8sconnect (from the ownership_baseline in private state)
+//  3. Paths referenced in the user's yaml_body
+//
+// Paths outside this union are treated as controller internals that k8sconnect has no
+// relationship with — tracking them produces noise and spurious inconsistency errors.
+func computeRelevantManagedFieldPaths(yamlBody string, baseline map[string]string, ownership map[string][]string) map[string]bool {
+	relevant := make(map[string]bool)
+
+	// (1) Currently owned by k8sconnect
+	for path, managers := range ownership {
+		for _, m := range managers {
+			if m == "k8sconnect" {
+				relevant[path] = true
+				break
+			}
+		}
+	}
+
+	// (2) Previously owned by k8sconnect (ADR-021 baseline)
+	for path, manager := range baseline {
+		if manager == "k8sconnect" {
+			relevant[path] = true
+		}
+	}
+
+	// (3) Paths referenced in yaml_body
+	if yamlBody != "" {
+		obj := &unstructured.Unstructured{}
+		if err := sigsyaml.Unmarshal([]byte(yamlBody), obj); err == nil {
+			for _, p := range extractAllFieldsFromYAML(obj.Object, "") {
+				relevant[p] = true
+			}
+		}
+	}
+
+	return relevant
+}
+
+// readOwnershipBaseline deserializes the ownership_baseline from private state.
+// Returns nil if the key is missing or unparseable.
+func readOwnershipBaseline(ctx context.Context, getter interface {
+	GetKey(context.Context, string) ([]byte, diag.Diagnostics)
+}) map[string]string {
+	raw, diags := getter.GetKey(ctx, "ownership_baseline")
+	if diags.HasError() || raw == nil {
+		return nil
+	}
+	var baseline map[string]string
+	if err := json.Unmarshal(raw, &baseline); err != nil {
+		tflog.Debug(ctx, "Failed to parse ownership baseline from private state", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return nil
+	}
+	return baseline
 }
 
 // saveOwnershipBaseline extracts ownership information from a K8s object
