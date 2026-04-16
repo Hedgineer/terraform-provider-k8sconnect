@@ -117,6 +117,20 @@ The upstream `release.yml` uses GPG signing for the Terraform Registry protocol.
 - **K8s interaction:** Server-Side Apply with dry-run for plan, SSA for apply
 - **Minimum K8s version:** 1.28
 
+## Validated (Apr 2026)
+
+PR #673 on hedgineer-bizops proved end-to-end:
+- Provider loads from OCI mirror (`hedgineercicdacr`) — `Installed hedgineer/k8sconnect v0.3.7 (verified checksum)`
+- Entra auth via kubelogin exec works — `data.k8sconnect_object.kube_system[0]: Read complete after 2s`
+- SSA dry-run reads real K8s state during plan
+- CA cert TLS verification works (`cluster_ca_certificate` from AKS module output)
+
+### Auth gotchas discovered
+
+- **ACR OAuth2 + OpenTofu:** `docker login` credentials from `az acr login` do NOT work — OpenTofu ignores Docker credential helpers and doesn't present config.json credentials in ACR's OAuth2 token exchange. Must use `oci_credentials` block in generated `.tfrc`. This is staging-only; prod/clients use pls-proxy where simple `docker login` works.
+- **kubelogin required:** k8sconnect talks to K8s API during plan (SSA dry-run). CI needs `az aks install-cli` to install kubelogin.
+- **Inline connection requires CA cert or insecure=true:** Added `cluster_ca_certificate` output to aks-cluster module.
+
 ## Upstream Resources
 
 - Repo: https://github.com/jmorris0x0/terraform-provider-k8sconnect
