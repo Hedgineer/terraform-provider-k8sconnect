@@ -339,7 +339,8 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 		}
 
 		// Project the dry-run result to show what will be created
-		return r.applyProjection(ctx, dryRunResult, paths, plannedData, isCreate, resp), nil
+		// CREATE has no previous baseline; applyProjection sets managed_fields to unknown anyway.
+		return r.applyProjection(ctx, dryRunResult, paths, plannedData, isCreate, nil, resp), nil
 	}
 
 	// UPDATE operations: Check for ownership transitions BEFORE dry-run
@@ -396,8 +397,11 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 		refreshedProjection = r.computeRefreshedProjection(ctx, currentObj, desiredObj, paths, plannedData)
 	}
 
-	// Apply projection from dry-run result
-	return r.applyProjection(ctx, dryRunResult, paths, plannedData, isCreate, resp), refreshedProjection
+	// Apply projection from dry-run result. Read ownership_baseline from private state
+	// (ADR-021) so applyProjection can scope managed_fields to paths k8sconnect has a
+	// relationship with (ADR-024).
+	baseline := readOwnershipBaseline(ctx, req.Private)
+	return r.applyProjection(ctx, dryRunResult, paths, plannedData, isCreate, baseline, resp), refreshedProjection
 }
 
 // performDryRun executes the dry-run against k8s
@@ -481,8 +485,11 @@ func (r *objectResource) performDryRun(ctx context.Context, client k8sclient.K8s
 	return dryRunResult, nil
 }
 
-// applyProjection projects fields and updates plan
-func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unstructured.Unstructured, paths []string, plannedData *objectResourceModel, isCreate bool, resp *resource.ModifyPlanResponse) bool {
+// applyProjection projects fields and updates plan. baseline is the previous ownership
+// baseline from private state (ADR-021); used (together with yaml_body and the live
+// ownership map) to scope managed_fields to fields k8sconnect actually has a relationship
+// with (ADR-024).
+func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unstructured.Unstructured, paths []string, plannedData *objectResourceModel, isCreate bool, baseline map[string]string, resp *resource.ModifyPlanResponse) bool {
 	// Apply ignore_fields filtering if specified
 	if ignoreFields := getIgnoreFields(ctx, plannedData); ignoreFields != nil {
 		paths = filterIgnoredPaths(paths, ignoreFields, dryRunResult.Object)
@@ -598,20 +605,29 @@ func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unst
 			})
 		}
 
-		// Filter out status fields - they are not preserved during Apply operations
-		// Also filter out K8s system annotations that appear/change unpredictably
+		// Scope managed_fields to paths k8sconnect has a relationship with (ADR-024):
+		// (1) currently owned by k8sconnect, (2) previously owned by k8sconnect per the
+		// baseline, or (3) present in the user's yaml_body. Paths outside this scope are
+		// foreign-controller internals; tracking them produces noise and "Provider produced
+		// inconsistent result after apply" errors when controllers write fields we never
+		// owned between plan and apply. ignore_fields stays in scope (still in yaml_body)
+		// so users can see who owns fields they've delegated.
+		relevantPaths := computeRelevantManagedFieldPaths(plannedData.YAMLBody.ValueString(), baseline, allOwnership)
 		for path := range ownershipMap {
+			if !relevantPaths[path] {
+				delete(ownershipMap, path)
+				continue
+			}
+			// Filter out status fields - they are not preserved during Apply operations
 			if strings.HasPrefix(path, "status.") || path == "status" {
 				delete(ownershipMap, path)
+				continue
 			}
 			// Filter K8s system annotations to avoid plan/apply inconsistencies
 			if fieldmanagement.IsKubernetesSystemAnnotation(path) {
 				delete(ownershipMap, path)
 			}
 		}
-
-		// NOTE: We do NOT filter out ignore_fields from managed_fields
-		// Users need visibility into who owns ignored fields
 
 		// Set managed_fields to predicted value from dry-run
 		predictedManagedFields, diags := types.MapValueFrom(ctx, types.StringType, ownershipMap)

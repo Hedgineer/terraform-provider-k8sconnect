@@ -81,7 +81,8 @@ func (r *objectResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 
 	// 8b. Update managed_fields attribute in state
-	updateManagedFieldsData(ctx, rc.Data, rc.Object)
+	// Create operation: no previous baseline yet (nil), scope is yaml_body + live k8sconnect ownership.
+	updateManagedFieldsData(ctx, rc.Data, rc.Object, data.YAMLBody.ValueString(), nil)
 
 	// 8c. Save ownership baseline to private state for drift detection (ADR-021)
 	ignoreFields := getIgnoreFields(ctx, rc.Data)
@@ -216,7 +217,10 @@ func (r *objectResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 
 	// 6. Update field ownership
-	updateManagedFieldsData(ctx, &data, currentObj)
+	// Read operation: use prior baseline from req.Private (ADR-021) to keep previously-owned
+	// paths in scope even if ownership transitioned to another manager.
+	baseline := readOwnershipBaseline(ctx, req.Private)
+	updateManagedFieldsData(ctx, &data, currentObj, data.YAMLBody.ValueString(), baseline)
 
 	// 7. Save refreshed state
 	diags = resp.State.Set(ctx, &data)
@@ -299,7 +303,10 @@ func (r *objectResource) Update(ctx context.Context, req resource.UpdateRequest,
 	}
 
 	// 7. Update managed_fields attribute in state
-	updateManagedFieldsData(ctx, &plan, rc.Object)
+	// Update operation: use prior baseline from req.Private (ADR-021) to keep previously-owned
+	// paths in scope even if ownership transitioned to another manager.
+	baseline := readOwnershipBaseline(ctx, req.Private)
+	updateManagedFieldsData(ctx, &plan, rc.Object, plan.YAMLBody.ValueString(), baseline)
 
 	// 7b. Save ownership baseline to private state for drift detection (ADR-021)
 	ignoreFields := getIgnoreFields(ctx, &plan)
