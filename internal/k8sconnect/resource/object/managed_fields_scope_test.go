@@ -43,13 +43,13 @@ spec:
 	// External controller (argocd-application-controller) owns operation.sync.
 	// k8sconnect has never touched operation.* and it's not in yaml_body.
 	ownership := map[string][]string{
-		"apiVersion":                 {"k8sconnect"},
-		"kind":                       {"k8sconnect"},
-		"metadata.name":              {"k8sconnect"},
-		"metadata.namespace":         {"k8sconnect"},
-		"spec.project":               {"k8sconnect"},
-		"operation.sync.revision":    {"argocd-application-controller"},
-		"operation.sync.prune":       {"argocd-application-controller"},
+		"apiVersion":                  {"k8sconnect"},
+		"kind":                        {"k8sconnect"},
+		"metadata.name":               {"k8sconnect"},
+		"metadata.namespace":          {"k8sconnect"},
+		"spec.project":                {"k8sconnect"},
+		"operation.sync.revision":     {"argocd-application-controller"},
+		"operation.sync.prune":        {"argocd-application-controller"},
 		"status.operationState.phase": {"argocd-application-controller"},
 	}
 
