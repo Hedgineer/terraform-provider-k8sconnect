@@ -74,6 +74,14 @@ required_providers {
 }
 ```
 
+**Pre-release patch versions**: When we carry a downstream-only fix on top of upstream (e.g., `hed-v0.3.8-p1` = "our patch before upstream 0.3.8 lands"), the OCI tag is `0.3.8-p1`. OpenTofu's resolver excludes pre-release versions from range constraints like `~> 0.3`, so consumers must pin explicitly:
+
+```hcl
+version = "0.3.8-p1"   # or "~> 0.3.8-p1"
+```
+
+Once upstream ships `v0.3.8` with the fix, consumers can drop the pin back to `~> 0.3` and `0.3.8` will supersede `0.3.8-p1` naturally.
+
 ## CI/CD
 
 ### Workflow files
