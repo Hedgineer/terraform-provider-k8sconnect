@@ -39,6 +39,21 @@ func extractOwnedPaths(ctx context.Context, managedFields []metav1.ManagedFields
 	paths := []string{}
 	parseOwnedFields(allOwnedFields, "", userJSON, &paths)
 
+	// Strip k8sconnect internal annotations. These are set by the provider during
+	// Apply/Update but are NOT present in the dry-run object at plan time, so
+	// including them in the projection path list would cause "new element"
+	// inconsistencies between plan-time and apply-time managed_state_projection.
+	// (Pre-ADR-025 this was masked by a separate bug in getFieldByPath that silently
+	// dropped dotted keys — the filter in fieldmanagement/ownership.go used the
+	// unencoded prefix and only happened to work for the managed_fields path.)
+	filteredPaths := paths[:0]
+	for _, p := range paths {
+		if !fieldmanagement.IsK8sconnectInternalAnnotationPath(p) {
+			filteredPaths = append(filteredPaths, p)
+		}
+	}
+	paths = filteredPaths
+
 	// Compare with what extractAllFieldsFromYAML would give us
 	standardPaths := extractAllFieldsFromYAML(userJSON, "")
 

@@ -124,6 +124,22 @@ func SplitPath(path string) []string {
 	return segs
 }
 
+// IsK8sconnectInternalAnnotationPath reports whether an encoded path points to
+// one of the provider's internal annotations (keys under metadata.annotations
+// whose name starts with "k8sconnect.terraform.io/"). These annotations are
+// implementation details and must be filtered from both managed_fields and
+// managed_state_projection so plan and apply agree.
+func IsK8sconnectInternalAnnotationPath(path string) bool {
+	segs := SplitPath(path)
+	if len(segs) < 3 {
+		return false
+	}
+	if DecodePathKey(segs[0]) != "metadata" || DecodePathKey(segs[1]) != "annotations" {
+		return false
+	}
+	return strings.HasPrefix(DecodePathKey(segs[2]), "k8sconnect.terraform.io/")
+}
+
 // FindSelectorStart returns the index of the '[' that begins an array selector
 // within a single raw segment, or -1 if none. '[' inside "..." does not count.
 func FindSelectorStart(segment string) int {
