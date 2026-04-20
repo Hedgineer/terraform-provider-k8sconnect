@@ -62,35 +62,36 @@ func TestGetFieldValue_DottedKeys(t *testing.T) {
 			wantVal: "ConfigMap",
 		},
 
-		// Keys with dots - the bug scenario
+		// Keys with dots - ADR-025 encoded path contract.
+		// Callers pass already-encoded paths; dotted keys are quote-wrapped.
 		{
 			name:    "ConfigMap data key with dot",
-			path:    "data.config.yaml",
+			path:    `data."config.yaml"`,
 			wantVal: "key: value",
 		},
 		{
 			name:    "ConfigMap data key with dot - app.conf",
-			path:    "data.app.conf",
+			path:    `data."app.conf"`,
 			wantVal: "setting=true",
 		},
 		{
 			name:    "ConfigMap data key with multiple dots",
-			path:    "data.nested.dot.key",
+			path:    `data."nested.dot.key"`,
 			wantVal: "deeply-dotted",
 		},
 		{
 			name:    "annotation with dots",
-			path:    "metadata.annotations.kubectl.kubernetes.io/last-applied-configuration",
+			path:    `metadata.annotations."kubectl.kubernetes.io/last-applied-configuration"`,
 			wantVal: `{"some":"json"}`,
 		},
 		{
 			name:    "annotation with dots - app version",
-			path:    "metadata.annotations.app.kubernetes.io/version",
+			path:    `metadata.annotations."app.kubernetes.io/version"`,
 			wantVal: "1.0",
 		},
 		{
 			name:    "label with dots",
-			path:    "metadata.labels.app.kubernetes.io/name",
+			path:    `metadata.labels."app.kubernetes.io/name"`,
 			wantVal: "myapp",
 		},
 
