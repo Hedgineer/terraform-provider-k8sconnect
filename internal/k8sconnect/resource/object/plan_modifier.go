@@ -718,7 +718,7 @@ func removeParentFieldsFromOwnership(ownership map[string]string) map[string]str
 	// For each field, check if there are child fields
 	// If so, remove the parent field
 	for path := range ownership {
-		parts := strings.Split(path, ".")
+		parts := fieldmanagement.SplitPath(path)
 		// Check all parent paths
 		for i := 1; i < len(parts); i++ {
 			parentPath := strings.Join(parts[:i], ".")
@@ -975,54 +975,16 @@ func stringSliceContains(slice []string, value string) bool {
 	return false
 }
 
-// getFieldValue extracts a field value from an unstructured object by JSON path.
-// Handles keys that contain dots (e.g., annotation keys like "kubectl.kubernetes.io/last-applied",
-// ConfigMap data keys like "config.yaml") by using greedy path resolution: at each level,
-// try nested navigation first, then fall back to treating the remaining path as a single key.
+// getFieldValue extracts a field value from an unstructured object using an
+// encoded path (ADR-025). Keys containing '.' are quote-wrapped in the path
+// (e.g. `data."config.yaml"`), so navigation is deterministic — no greedy
+// fallback needed.
 func getFieldValue(obj *unstructured.Unstructured, fieldPath string) interface{} {
 	if obj == nil {
 		return nil
 	}
-	return getNestedFieldValue(obj.Object, fieldPath)
-}
-
-// getNestedFieldValue recursively resolves a dot-separated field path against a map,
-// handling keys that themselves contain dots by trying nested navigation first
-// and falling back to exact key match.
-func getNestedFieldValue(current interface{}, path string) interface{} {
-	if path == "" {
-		return current
-	}
-
-	m, ok := current.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-
-	// For paths without dots, simple direct lookup
-	dotIdx := strings.Index(path, ".")
-	if dotIdx < 0 {
-		return m[path]
-	}
-
-	// Path has dots: try navigating nested first (most common case)
-	key := path[:dotIdx]
-	rest := path[dotIdx+1:]
-
-	if val, exists := m[key]; exists {
-		result := getNestedFieldValue(val, rest)
-		if result != nil {
-			return result
-		}
-	}
-
-	// Fallback: try the full remaining path as a single key
-	// This handles keys with dots like "config.yaml" or "kubectl.kubernetes.io/last-applied"
-	if val, exists := m[path]; exists {
-		return val
-	}
-
-	return nil
+	val, _ := getFieldByPath(obj.Object, fieldPath)
+	return val
 }
 
 // setObjectRefFromDesiredObj populates object_ref from the parsed resource during plan phase

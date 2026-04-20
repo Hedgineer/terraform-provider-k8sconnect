@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -124,10 +125,7 @@ func parseOwnedFields(ownership map[string]interface{}, prefix string, userObj i
 		if strings.HasPrefix(key, "f:") {
 			// Regular field
 			fieldName := strings.TrimPrefix(key, "f:")
-			currentPath := fieldName
-			if prefix != "" {
-				currentPath = prefix + "." + fieldName
-			}
+			currentPath := fieldmanagement.JoinPath(prefix, fieldmanagement.EncodePathKey(fieldName))
 
 			// Check if this field exists in user's object
 			var userFieldValue interface{}
@@ -333,19 +331,26 @@ type PathSegment struct {
 	Selector *ArraySelector // nil for non-array fields
 }
 
-// parsePath converts "spec.containers[name=nginx].image" into segments
+// parsePath converts an encoded path (see fieldmanagement/paths.go) into segments.
+// Examples:
+//
+//	spec.replicas                                    -> [{Field:"spec"}, {Field:"replicas"}]
+//	data."config.yaml"                               -> [{Field:"data"}, {Field:"config.yaml"}]
+//	spec.containers[name=nginx].image                -> [{Field:"spec"}, {Field:"containers", Selector:{name=nginx}}, {Field:"image"}]
 func parsePath(path string) []PathSegment {
-	parts := strings.Split(path, ".")
+	parts := fieldmanagement.SplitPath(path)
 	segments := make([]PathSegment, 0, len(parts))
 
 	for _, part := range parts {
-		segment := PathSegment{Field: part}
+		segment := PathSegment{}
 
-		if idx := strings.Index(part, "["); idx >= 0 {
-			segment.Field = part[:idx]
+		if idx := fieldmanagement.FindSelectorStart(part); idx >= 0 {
+			segment.Field = fieldmanagement.DecodePathKey(part[:idx])
 			selectorStr := part[idx+1 : len(part)-1]
 			selector := parseArraySelector(selectorStr)
 			segment.Selector = &selector
+		} else {
+			segment.Field = fieldmanagement.DecodePathKey(part)
 		}
 
 		segments = append(segments, segment)
@@ -684,67 +689,107 @@ func navigateToArrayIndex(current interface{}, index int) (interface{}, bool) {
 	return arraySlice[index], true
 }
 
-// navigateToPath walks through the object following a dotted path
-// Returns the value at that path, or nil if not found
+// navigateToPath walks through the object following an encoded path.
+// Returns the value at that path, or nil if not found.
 func navigateToPath(obj map[string]interface{}, path string) (interface{}, bool) {
 	if path == "" {
 		return obj, true
 	}
 
-	// Remove trailing array selector if present (we want the array itself)
-	path = strings.TrimSuffix(path, "]")
-	if idx := strings.LastIndex(path, "["); idx != -1 {
-		path = path[:idx]
+	// Strip a trailing array selector (we want the array itself).
+	rawSegs := fieldmanagement.SplitPath(path)
+	if n := len(rawSegs); n > 0 {
+		if idx := fieldmanagement.FindSelectorStart(rawSegs[n-1]); idx >= 0 {
+			rawSegs[n-1] = rawSegs[n-1][:idx]
+			if rawSegs[n-1] == "" {
+				rawSegs = rawSegs[:n-1]
+			}
+		}
 	}
 
-	segments := strings.Split(path, ".")
 	current := interface{}(obj)
-
-	for _, seg := range segments {
-		if seg == "" {
+	for _, raw := range rawSegs {
+		if raw == "" {
 			continue
 		}
-
-		// Navigate into object
+		seg := fieldmanagement.DecodePathKey(raw)
 		currentMap, ok := current.(map[string]interface{})
 		if !ok {
 			return nil, false
 		}
-
 		next, exists := currentMap[seg]
 		if !exists {
 			return nil, false
 		}
-
 		current = next
 	}
 
 	return current, true
 }
 
-// pathMatchesIgnorePattern checks if a path matches an ignore pattern
-// Pattern matches if it's a prefix of the path (allowing parent fields to ignore children)
-// Supports JSONPath predicates: containers[?(@.name=='nginx')].image
+// pathMatchesIgnorePattern checks if a path matches an ignore pattern.
+// Pattern matches if it's a prefix of the path (allowing parent fields to ignore children).
+// Supports JSONPath predicates: containers[?(@.name=='nginx')].image.
+//
+// Back-compat (ADR-025): user patterns may be written with unescaped dots
+// even when a key itself contains dots — e.g. `metadata.annotations.app.kubernetes.io/name`
+// where `app.kubernetes.io/name` is a single annotation key. The matcher falls back
+// to joining consecutive pattern segments with "." to match a single encoded path
+// segment. Users can also use the explicit quoted form: `metadata.annotations."app.kubernetes.io/name"`.
 func pathMatchesIgnorePattern(path, pattern string, obj map[string]interface{}) bool {
 	pathSegments := parsePath(path)
-
-	// Resolve any JSONPath predicates in the pattern to positional selectors
 	resolvedPattern := resolveJSONPathPredicates(pattern, obj)
 	patternSegments := parsePath(resolvedPattern)
 
-	// Pattern must be <= path length (prefix or exact match)
-	if len(patternSegments) > len(pathSegments) {
-		return false
-	}
-
-	// Compare each segment of the pattern
-	for i, patternSeg := range patternSegments {
-		if !segmentsMatch(pathSegments[i], patternSeg) {
-			return false
+	// Fast path: direct prefix match (no segment joining needed)
+	if len(patternSegments) <= len(pathSegments) {
+		ok := true
+		for i, patternSeg := range patternSegments {
+			if !segmentsMatch(pathSegments[i], patternSeg) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
 		}
 	}
 
-	return true
+	// Slow path: allow consecutive no-selector pattern segments to join with "." and
+	// match a single path segment whose field contains those dots. This lets
+	// "data.config.yaml" match the encoded path "data.\"config.yaml\"".
+	return matchPatternWithJoining(patternSegments, pathSegments, 0, 0)
+}
+
+func matchPatternWithJoining(pat, path []PathSegment, pi, ti int) bool {
+	if pi == len(pat) {
+		return true // pattern exhausted -> prefix match
+	}
+	if ti == len(path) {
+		return false
+	}
+	p := pat[pi]
+	t := path[ti]
+
+	// Direct 1-to-1 segment match
+	if segmentsMatch(t, p) && matchPatternWithJoining(pat, path, pi+1, ti+1) {
+		return true
+	}
+
+	// Join consecutive no-selector pattern segments and try to match one path segment.
+	if p.Selector == nil && t.Selector == nil {
+		joined := p.Field
+		for k := pi + 1; k < len(pat); k++ {
+			if pat[k].Selector != nil {
+				break
+			}
+			joined = joined + "." + pat[k].Field
+			if joined == t.Field && matchPatternWithJoining(pat, path, k+1, ti+1) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // segmentsMatch checks if two path segments match
@@ -813,12 +858,7 @@ func extractFieldPaths(obj map[string]interface{}, prefix string) []string {
 	var paths []string
 
 	for key, value := range obj {
-		var currentPath string
-		if prefix == "" {
-			currentPath = key
-		} else {
-			currentPath = prefix + "." + key
-		}
+		currentPath := fieldmanagement.JoinPath(prefix, fieldmanagement.EncodePathKey(key))
 
 		switch v := value.(type) {
 		case map[string]interface{}:
