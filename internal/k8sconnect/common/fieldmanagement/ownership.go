@@ -75,10 +75,7 @@ func extractPathsFromFieldsV1(fields map[string]interface{}, prefix string, user
 		if strings.HasPrefix(key, "f:") {
 			// Regular field
 			fieldName := strings.TrimPrefix(key, "f:")
-			currentPath := fieldName
-			if prefix != "" {
-				currentPath = prefix + "." + fieldName
-			}
+			currentPath := JoinPath(prefix, EncodePathKey(fieldName))
 
 			if subFields, ok := value.(map[string]interface{}); ok && len(subFields) > 0 {
 				// Has sub-fields - recurse
@@ -176,10 +173,7 @@ func extractPathsFromFieldsV1Simple(fields map[string]interface{}, prefix string
 		if strings.HasPrefix(key, "f:") {
 			// Regular field
 			fieldName := strings.TrimPrefix(key, "f:")
-			currentPath := fieldName
-			if prefix != "" {
-				currentPath = prefix + "." + fieldName
-			}
+			currentPath := JoinPath(prefix, EncodePathKey(fieldName))
 
 			if subFields, ok := value.(map[string]interface{}); ok && len(subFields) > 0 {
 				// Has sub-fields - recurse
