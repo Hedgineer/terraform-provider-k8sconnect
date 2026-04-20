@@ -52,7 +52,7 @@ func ParseFieldsV1ToPathMap(managedFields []metav1.ManagedFieldsEntry, userJSON 
 		for _, path := range paths {
 			// Skip internal k8sconnect annotations - these are implementation details
 			// and should not be tracked as user-managed fields
-			if strings.HasPrefix(path, "metadata.annotations.k8sconnect.terraform.io/") {
+			if IsK8sconnectInternalAnnotationPath(path) {
 				continue
 			}
 			result[path] = ManagedFields{
@@ -154,7 +154,7 @@ func ExtractManagedFieldsMap(obj *unstructured.Unstructured) map[string]string {
 		for _, path := range paths {
 			// Skip internal k8sconnect annotations - these are implementation details
 			// and should not be tracked as user-managed fields
-			if strings.HasPrefix(path, "metadata.annotations.k8sconnect.terraform.io/") {
+			if IsK8sconnectInternalAnnotationPath(path) {
 				continue
 			}
 			result[path] = mf.Manager
@@ -231,7 +231,7 @@ func ExtractAllManagedFields(obj *unstructured.Unstructured) map[string][]string
 		paths := extractPathsFromFieldsV1(fields, "", obj.Object)
 		for _, path := range paths {
 			// Skip internal k8sconnect annotations
-			if strings.HasPrefix(path, "metadata.annotations.k8sconnect.terraform.io/") {
+			if IsK8sconnectInternalAnnotationPath(path) {
 				continue
 			}
 
