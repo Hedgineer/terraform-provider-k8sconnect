@@ -77,6 +77,31 @@ func TestSplitPath(t *testing.T) {
 	}
 }
 
+func TestIsK8sconnectInternalAnnotationPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		// Canonical encoded form — the only form producers emit post-ADR-025.
+		{`metadata.annotations."k8sconnect.terraform.io/terraform-id"`, true},
+		{`metadata.annotations."k8sconnect.terraform.io/created-at"`, true},
+		// Unrelated annotations and paths must not match.
+		{`metadata.annotations."app.kubernetes.io/name"`, false},
+		{"metadata.annotations.foo", false},
+		{"metadata.name", false},
+		{"spec.replicas", false},
+		{"data.key", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if got := IsK8sconnectInternalAnnotationPath(tt.path); got != tt.want {
+				t.Errorf("IsK8sconnectInternalAnnotationPath(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFindSelectorStart(t *testing.T) {
 	tests := []struct {
 		in   string
