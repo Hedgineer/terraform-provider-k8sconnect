@@ -54,7 +54,7 @@ jobs:
 
           VERSION="${{ steps.version.outputs.version }}"
           PROJECT="terraform-provider-k8sconnect"
-          PLATFORMS=("darwin/amd64" "linux/amd64" "windows/amd64")
+          PLATFORMS=("darwin/amd64" "darwin/arm64" "linux/amd64" "windows/amd64")
 
           mkdir -p dist
           for PLATFORM in "${PLATFORMS[@]}"; do
@@ -87,7 +87,7 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           PROJECT="terraform-provider-k8sconnect"
           LAYOUT="oci-layout"
-          PLATFORMS=("darwin/amd64" "linux/amd64" "windows/amd64")
+          PLATFORMS=("darwin/amd64" "darwin/arm64" "linux/amd64" "windows/amd64")
           TAGS=()
 
           for PLATFORM in "${PLATFORMS[@]}"; do
