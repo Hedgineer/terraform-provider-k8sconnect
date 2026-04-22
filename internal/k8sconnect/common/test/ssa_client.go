@@ -178,6 +178,53 @@ func (c *SSATestClient) ApplyDeploymentMemoryLimitSSA(ctx context.Context, names
 	return nil
 }
 
+// ApplyMinimalServiceSSA creates a Service via Server-Side Apply with a minimal
+// spec (one port, one selector label) under the given field manager. Used to
+// seed a k8sconnect-owned Service for import-flow regression tests.
+func (c *SSATestClient) ApplyMinimalServiceSSA(ctx context.Context, namespace, name, fieldManager string) error {
+	patch := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      name,
+			"namespace": namespace,
+		},
+		"spec": map[string]interface{}{
+			"ports": []map[string]interface{}{
+				{
+					"name":       "tcp",
+					"port":       6379,
+					"targetPort": 6379,
+				},
+			},
+			"selector": map[string]interface{}{
+				"app.kubernetes.io/name": name,
+			},
+		},
+	}
+
+	patchData, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("failed to marshal patch: %w", err)
+	}
+
+	result := c.clientset.CoreV1().RESTClient().
+		Patch(types.ApplyPatchType).
+		Namespace(namespace).
+		Resource("services").
+		Name(name).
+		Param("fieldManager", fieldManager).
+		Param("force", "true").
+		Body(patchData).
+		Do(ctx)
+
+	if err := result.Error(); err != nil {
+		return fmt.Errorf("SSA patch failed: %w", err)
+	}
+
+	return nil
+}
+
 // ApplyServicePortSSA uses Server-Side Apply to modify a service port with a specific field manager.
 // This can be used to test field ownership conflicts on Service resources.
 func (c *SSATestClient) ApplyServicePortSSA(ctx context.Context, namespace, name string, port int32, fieldManager string) error {
