@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -17,6 +18,7 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/ownership"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	sigsyaml "sigs.k8s.io/yaml"
 )
 
 // ModifyPlan implements resource.ResourceWithModifyPlan
@@ -182,10 +184,11 @@ func (r *objectResource) checkDriftAndPreserveState(ctx context.Context, req res
 				tflog.Debug(ctx, "Using refreshed projection from ModifyPlan Get for drift comparison")
 			}
 
-			// If projections match AND yaml_body matches, the plan is a no-op:
-			// preserve state's computed fields to suppress cosmetic diffs.
+			// If projections match AND yaml_body has the same field set,
+			// preserve state's computed fields to suppress cosmetic diffs
+			// (whitespace/ordering/quoting changes).
 			//
-			// The yaml_body equality check is critical. Without it, an imported
+			// The field-set equality check is critical. Without it, an imported
 			// resource (whose state.yaml_body is the full live object including
 			// server-set defaults) would have its bloated yaml_body preserved into
 			// the plan, even when the user's configured yaml_body is minimal.
@@ -193,13 +196,16 @@ func (r *objectResource) checkDriftAndPreserveState(ctx context.Context, req res
 			// take ownership of all server-set defaults, and produce a projection
 			// with more keys than the plan predicted — tripping the framework's
 			// consistency check ("new element has appeared") on every default
-			// field (spec.clusterIP, spec.sessionAffinity, etc.). See repro notes.
+			// field (spec.clusterIP, spec.sessionAffinity, etc.). See ADR-026.
 			//
-			// When yaml_body differs between state and plan, the user changed
-			// their config: honor the new yaml_body, skip preservation, let the
-			// fresh projection/managed_fields flow through unchanged.
-			yamlBodyMatches := stateData.YAMLBody.Equal(plannedData.YAMLBody)
-			if baselineProjection.Equal(plannedData.ManagedStateProjection) && yamlBodyMatches {
+			// We compare FIELD SETS rather than raw text so cosmetic changes
+			// (whitespace, ordering, quote style) still qualify for preservation,
+			// matching TestAccObjectResource_NoUpdateOnFormattingChanges.
+			yamlBodySameFields := yamlBodiesHaveSameFieldSet(
+				stateData.YAMLBody.ValueString(),
+				plannedData.YAMLBody.ValueString(),
+			)
+			if baselineProjection.Equal(plannedData.ManagedStateProjection) && yamlBodySameFields {
 				tflog.Debug(ctx, "No Kubernetes resource changes detected, preserving YAML")
 				// Preserve the original YAML and internal fields since no actual changes will occur
 				plannedData.YAMLBody = stateData.YAMLBody
@@ -226,6 +232,46 @@ func (r *objectResource) checkDriftAndPreserveState(ctx context.Context, req res
 			}
 		}
 	}
+}
+
+// yamlBodiesHaveSameFieldSet reports whether two YAML bodies define the same
+// set of field paths, ignoring value differences and purely cosmetic changes
+// (whitespace, ordering, quoting).
+//
+// ADR-026: used to decide whether checkDriftAndPreserveState can safely
+// preserve state's yaml_body. A cosmetic change produces identical field sets
+// (safe to preserve). A post-import bloated yaml_body contains fields the
+// user's config doesn't, producing a larger field set (not safe to preserve —
+// doing so would SSA-send extra fields under force=true and take ownership of
+// server-set defaults).
+//
+// Returns false on unparseable YAML so the caller falls through to the
+// non-preserving path (which is safer than silently preserving).
+func yamlBodiesHaveSameFieldSet(a, b string) bool {
+	if a == b {
+		return true
+	}
+	objA := &unstructured.Unstructured{}
+	if err := sigsyaml.Unmarshal([]byte(a), objA); err != nil {
+		return false
+	}
+	objB := &unstructured.Unstructured{}
+	if err := sigsyaml.Unmarshal([]byte(b), objB); err != nil {
+		return false
+	}
+	pathsA := extractFieldPaths(objA.Object, "")
+	pathsB := extractFieldPaths(objB.Object, "")
+	if len(pathsA) != len(pathsB) {
+		return false
+	}
+	sort.Strings(pathsA)
+	sort.Strings(pathsB)
+	for i := range pathsA {
+		if pathsA[i] != pathsB[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // executeDryRunAndProjection performs dry-run and calculates field projection.
