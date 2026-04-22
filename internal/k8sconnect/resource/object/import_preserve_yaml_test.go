@@ -1,6 +1,7 @@
 package object_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
@@ -19,24 +20,31 @@ import (
 // the reimport-then-apply bug that broke client-jhc's staging deploys on
 // hed-v0.3.8-p2. See ADR-026 for the full incident write-up.
 //
-// Reproduction path:
-//  1. Apply a Service with minimal yaml_body (no clusterIP, type, sessionAffinity, etc.).
-//     K8s admission adds defaults; k8sconnect owns only ports + selector.
-//  2. Remove the Service from Terraform state (`tofu state rm`).
-//  3. Import it back. Import serializes the full live object into state.yaml_body
-//     (bloated: includes spec.clusterIP, spec.type, spec.sessionAffinity, ...).
-//  4. Run plan. Dry-run of user's minimal yaml_body produces a projection whose
-//     values equal state's stored projection (same user fields, same cluster values).
-//  5. Pre-fix: checkDriftAndPreserveState sees matching projections and restores
-//     plannedData.YAMLBody = stateData.YAMLBody (bloated). Apply SSA-sends the
-//     bloated yaml with force=true. k8sconnect takes ownership of every field.
-//     Post-apply projection balloons (e.g. 8 -> 16 entries). Framework trips
-//     "Provider produced inconsistent result after apply: .managed_state_projection:
-//     new element <X> has appeared" for each server-set default (spec.clusterIP,
-//     spec.sessionAffinity, spec.ipFamilies, ...).
+// Mechanism:
+//   - Import serializes the entire live Kubernetes object (including every
+//     admission-defaulted field — clusterIP, sessionAffinity, ipFamilies,
+//     ipFamilyPolicy, type, ports[0].protocol, ...) into state.yaml_body.
+//   - On the next plan, ModifyPlan dry-runs the user's minimal yaml_body.
+//     Projection values happen to match state's projection (same cluster state,
+//     same user-owned fields).
+//   - checkDriftAndPreserveState's pre-fix condition fired on matching
+//     projections alone and restored stateData.YAMLBody (the bloated import)
+//     into plannedData.YAMLBody.
+//   - Apply SSA-sent the bloated yaml with force=true. k8sconnect took
+//     ownership of every server-set default. Post-apply projection grew from
+//     ~8 entries to ~16. Framework tripped "Provider produced inconsistent
+//     result after apply: .managed_state_projection: new element <X>
+//     has appeared" for each default field.
 //
-// Fix: preserve state yaml_body only when plannedData.YAMLBody also equals it.
-// If user intent (yaml_body) differs, honor the new yaml_body.
+// Fix: only preserve when plannedData.YAMLBody also equals stateData.YAMLBody.
+// If the user's yaml_body differs from state's (as it does post-import),
+// skip preservation entirely — honor the user's config.
+//
+// Test construction: we create the Service with the k8sconnect field manager
+// out-of-band (so the import won't complain about an unmanaged resource), then
+// use Terraform's native `import {}` block to bring it into state along with
+// a MINIMAL user yaml_body. Pre-fix the apply phase would fail; post-fix it
+// converges on the scoped (ports+selector) state.
 func TestAccObjectResource_ImportPreservesUserYAMLBody(t *testing.T) {
 	t.Parallel()
 
@@ -48,54 +56,43 @@ func TestAccObjectResource_ImportPreservesUserYAMLBody(t *testing.T) {
 	ns := fmt.Sprintf("reimport-yaml-%d", time.Now().UnixNano()%1000000)
 	svcName := fmt.Sprintf("reimport-svc-%d", time.Now().UnixNano()%1000000)
 	k8sClient := testhelpers.CreateK8sClient(t, raw)
+	ssaClient := testhelpers.NewSSATestClient(t, raw)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
 			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
 		},
 		Steps: []resource.TestStep{
-			// Step 1: Apply user's minimal Service. Baseline.
+			// Step 1: create namespace via Terraform.
 			{
-				Config: testAccReimportConfig(ns, svcName),
+				Config: testAccReimportNamespaceOnly(ns),
+				ConfigVariables: config.Variables{
+					"raw": config.StringVariable(raw),
+				},
+				Check: testhelpers.CheckNamespaceExists(k8sClient, ns),
+			},
+			// Step 2: Out-of-band create the Service with the k8sconnect field
+			// manager (so a subsequent import succeeds), then import it via a
+			// Terraform `import {}` block against a MINIMAL user yaml_body.
+			//
+			// This exactly reproduces the client-jhc flow: state gets a bloated
+			// yaml_body from import, user's config has a minimal yaml_body,
+			// apply has to reconcile. Pre-fix this step fails with "Provider
+			// produced inconsistent result after apply"; post-fix it passes.
+			{
+				PreConfig: func() {
+					ctx := context.Background()
+					if err := ssaClient.ApplyMinimalServiceSSA(ctx, ns, svcName, "k8sconnect"); err != nil {
+						t.Fatalf("failed to seed Service with SSA: %v", err)
+					}
+				},
+				Config: testAccReimportWithImportBlock(ns, svcName),
 				ConfigVariables: config.Variables{
 					"raw":  config.StringVariable(raw),
 					"name": config.StringVariable(svcName),
 				},
 				Check: resource.ComposeTestCheckFunc(
 					testhelpers.CheckServiceExists(k8sClient, ns, svcName),
-				),
-			},
-			// Step 2: Re-import the Service. This makes state.yaml_body the full
-			// live object (with clusterIP, type, etc.). Then re-apply with the
-			// same user config. Pre-fix this triggered the inconsistency error.
-			// ImportStatePersist + refresh + apply exercises the exact path.
-			{
-				Config: testAccReimportConfig(ns, svcName),
-				ConfigVariables: config.Variables{
-					"raw":  config.StringVariable(raw),
-					"name": config.StringVariable(svcName),
-				},
-				ResourceName:       "k8sconnect_object.svc",
-				ImportState:        true,
-				ImportStatePersist: true,
-				ImportStateId:      fmt.Sprintf("k3d-k8sconnect-test:%s:v1/Service:%s", ns, svcName),
-				// Import yields a bloated yaml_body; ImportStateVerify would
-				// complain about that against the user's minimal config. We
-				// verify the behavior in the follow-up step instead.
-				ImportStateVerify: false,
-			},
-			// Step 3: Plan + apply with the user's minimal config. This must not
-			// trip "Provider produced inconsistent result". The projection and
-			// managed_fields must stabilize on the scoped set (no server-set
-			// defaults leaking in).
-			{
-				Config: testAccReimportConfig(ns, svcName),
-				ConfigVariables: config.Variables{
-					"raw":  config.StringVariable(raw),
-					"name": config.StringVariable(svcName),
-				},
-				// A subsequent plan must show no changes: state has converged.
-				Check: resource.ComposeTestCheckFunc(
 					// managed_fields only tracks k8sconnect-owned user paths.
 					resource.TestCheckResourceAttr("k8sconnect_object.svc",
 						"managed_fields.spec.selector", "k8sconnect"),
@@ -108,16 +105,16 @@ func TestAccObjectResource_ImportPreservesUserYAMLBody(t *testing.T) {
 						"managed_fields.spec.ipFamilies"),
 					resource.TestCheckNoResourceAttr("k8sconnect_object.svc",
 						"managed_fields.spec.type"),
-					// managed_state_projection likewise scoped.
+					// Projection scoped the same way.
 					resource.TestCheckNoResourceAttr("k8sconnect_object.svc",
 						"managed_state_projection.spec.clusterIP"),
 					resource.TestCheckNoResourceAttr("k8sconnect_object.svc",
 						"managed_state_projection.spec.type"),
 				),
 			},
-			// Step 4: Empty follow-up plan — state has converged.
+			// Step 3: plan is empty — state has converged.
 			{
-				Config: testAccReimportConfig(ns, svcName),
+				Config: testAccReimportWithImportBlock(ns, svcName),
 				ConfigVariables: config.Variables{
 					"raw":  config.StringVariable(raw),
 					"name": config.StringVariable(svcName),
@@ -129,49 +126,68 @@ func TestAccObjectResource_ImportPreservesUserYAMLBody(t *testing.T) {
 	})
 }
 
-func testAccReimportConfig(namespace, svcName string) string {
+func testAccReimportNamespaceOnly(namespace string) string {
+	return fmt.Sprintf(`
+variable "raw" { type = string }
+
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "ns" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: %s
+  YAML
+  cluster = { kubeconfig = var.raw }
+}
+`, namespace)
+}
+
+func testAccReimportWithImportBlock(namespace, svcName string) string {
 	return fmt.Sprintf(`
 variable "raw"  { type = string }
 variable "name" { type = string }
 
 provider "k8sconnect" {}
 
-locals {
+resource "k8sconnect_object" "ns" {
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: %s
+  YAML
   cluster = { kubeconfig = var.raw }
 }
 
-resource "k8sconnect_object" "ns" {
-  yaml_body = <<YAML
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: %s
-YAML
-  cluster = local.cluster
+# Import the existing Service. Pre-fix, the post-import apply cycle would
+# fail because the preservation heuristic restored the bloated imported
+# yaml_body into the plan.
+import {
+  to = k8sconnect_object.svc
+  id = "k3d-k8sconnect-test:%s:v1/Service:%s"
 }
 
 resource "k8sconnect_object" "svc" {
   depends_on = [k8sconnect_object.ns]
 
-  # Minimal Service yaml — no clusterIP, type, sessionAffinity, ipFamilies, etc.
-  # K8s admission assigns all these defaults on the server side. The test
-  # checks that those server-set defaults do NOT leak into state after a
-  # re-import + apply cycle.
-  yaml_body = <<YAML
-apiVersion: v1
-kind: Service
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  ports:
-    - name: tcp
-      port: 6379
-      targetPort: 6379
-  selector:
-    app.kubernetes.io/name: %s
-YAML
-  cluster = local.cluster
+  # Minimal user config — no clusterIP, type, sessionAffinity, ipFamilies, etc.
+  yaml_body = <<-YAML
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: %s
+      namespace: %s
+    spec:
+      ports:
+        - name: tcp
+          port: 6379
+          targetPort: 6379
+      selector:
+        app.kubernetes.io/name: %s
+  YAML
+  cluster = { kubeconfig = var.raw }
 }
-`, namespace, svcName, namespace, svcName)
+`, namespace, namespace, svcName, svcName, namespace, svcName)
 }
