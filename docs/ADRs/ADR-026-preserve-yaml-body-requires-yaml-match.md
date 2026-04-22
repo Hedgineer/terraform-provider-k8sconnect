@@ -90,22 +90,40 @@ louder. The actual underlying bug predates ADR-024 by a wide margin.
 
 ## Decision
 
-Preserve only when **yaml_body also matches**:
+Preserve only when the two yaml_body strings **define the same field set**
+(semantic comparison, not textual):
 
 ```go
-yamlBodyMatches := stateData.YAMLBody.Equal(plannedData.YAMLBody)
-if baselineProjection.Equal(plannedData.ManagedStateProjection) && yamlBodyMatches {
-    plannedData.YAMLBody = stateData.YAMLBody          // no-op, they're equal
+yamlBodySameFields := yamlBodiesHaveSameFieldSet(
+    stateData.YAMLBody.ValueString(),
+    plannedData.YAMLBody.ValueString(),
+)
+if baselineProjection.Equal(plannedData.ManagedStateProjection) && yamlBodySameFields {
+    // safe to preserve: same projection values AND same declared fields
+    plannedData.YAMLBody = stateData.YAMLBody
     plannedData.ManagedStateProjection = stateData.ManagedStateProjection
     plannedData.ObjectRef = stateData.ObjectRef
     // …preserve managed_fields when eligible
 }
 ```
 
-If `yaml_body` differs, the user changed their config (or state carries a
-yaml_body that was written by a different path, such as import). Honor the
-new `plannedData.YAMLBody`, skip preservation, let the fresh projection and
-managed_fields flow through.
+`yamlBodiesHaveSameFieldSet` parses both strings and compares the sorted
+lists of field paths produced by `extractFieldPaths`. This deliberately
+ignores value differences (handled by the projection equality check) and
+cosmetic textual differences (whitespace, ordering, quoting).
+
+Three outcomes:
+
+| state.yaml_body | plannedData.yaml_body | Preservation? |
+|---|---|---|
+| Same field set (cosmetic diff: whitespace, ordering) | Same field set | ✓ preserve — suppress spurious yaml_body diff |
+| Bloated from import (has fields user's config omits) | User's minimal yaml | ✗ skip — apply the user's narrower yaml |
+| User removed a field | User's narrower yaml | ✗ skip — honor the removal |
+
+The first case is the original motivation (matches
+`TestAccObjectResource_NoUpdateOnFormattingChanges`). The second case is the
+client-jhc bug. The third case was arguably already buggy under the old
+preservation logic and is now correctly handled.
 
 ## Consequences
 
@@ -119,11 +137,11 @@ managed_fields flow through.
 
 ### Negative / trade-off
 
-- Users who edit their yaml_body purely cosmetically (whitespace, comment,
-  field-ordering) now see a yaml_body diff in `tofu plan` even when the
-  projection is unchanged. This is strictly less noisy than the bug it
-  replaces (apply failures), and arguably more truthful — the yaml_body
-  really did change in the config.
+- Adds a YAML parse per plan. Negligible (milliseconds) — `extractFieldPaths`
+  walks a typical manifest in microseconds.
+- If `yamlBodiesHaveSameFieldSet` fails to parse either YAML, we fall through
+  to the non-preserving branch (safer failure mode: shows a diff instead of
+  silently preserving potentially stale state).
 
 ### Non-goals
 
