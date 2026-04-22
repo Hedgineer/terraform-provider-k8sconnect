@@ -182,8 +182,24 @@ func (r *objectResource) checkDriftAndPreserveState(ctx context.Context, req res
 				tflog.Debug(ctx, "Using refreshed projection from ModifyPlan Get for drift comparison")
 			}
 
-			// If projections match, only YAML formatting changed in Kubernetes
-			if baselineProjection.Equal(plannedData.ManagedStateProjection) {
+			// If projections match AND yaml_body matches, the plan is a no-op:
+			// preserve state's computed fields to suppress cosmetic diffs.
+			//
+			// The yaml_body equality check is critical. Without it, an imported
+			// resource (whose state.yaml_body is the full live object including
+			// server-set defaults) would have its bloated yaml_body preserved into
+			// the plan, even when the user's configured yaml_body is minimal.
+			// The apply would then SSA-send the bloated yaml with force=true,
+			// take ownership of all server-set defaults, and produce a projection
+			// with more keys than the plan predicted — tripping the framework's
+			// consistency check ("new element has appeared") on every default
+			// field (spec.clusterIP, spec.sessionAffinity, etc.). See repro notes.
+			//
+			// When yaml_body differs between state and plan, the user changed
+			// their config: honor the new yaml_body, skip preservation, let the
+			// fresh projection/managed_fields flow through unchanged.
+			yamlBodyMatches := stateData.YAMLBody.Equal(plannedData.YAMLBody)
+			if baselineProjection.Equal(plannedData.ManagedStateProjection) && yamlBodyMatches {
 				tflog.Debug(ctx, "No Kubernetes resource changes detected, preserving YAML")
 				// Preserve the original YAML and internal fields since no actual changes will occur
 				plannedData.YAMLBody = stateData.YAMLBody
