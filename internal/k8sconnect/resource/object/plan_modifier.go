@@ -15,6 +15,7 @@ import (
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/factory"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/fieldmanagement"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8sclient"
+	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/k8serrors"
 	"github.com/jmorris0x0/terraform-provider-k8sconnect/internal/k8sconnect/common/ownership"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -293,15 +294,19 @@ func (r *objectResource) executeDryRunAndProjection(ctx context.Context, req res
 				"CRD not found during plan: projection will be calculated during apply")
 			return true, nil
 		}
-		// Surface the underlying client setup error (auth, network, invalid
-		// connection config) so terraform fails the run with the real cause.
-		// Without this, setupDryRunClient's silent setProjectionUnknown produces
-		// a "Provider produced inconsistent final plan" error during apply-time
-		// re-plan when the saved plan had a known projection.
-		resourceDesc := fmt.Sprintf("%s/%s %s/%s",
-			desiredObj.GetAPIVersion(), desiredObj.GetKind(),
-			desiredObj.GetNamespace(), desiredObj.GetName())
-		r.addClassifiedError(&resp.Diagnostics, err, "Plan", resourceDesc, desiredObj.GetAPIVersion())
+		// Surface auth/connection failures explicitly. Without this, the silent
+		// setProjectionUnknown inside setupDryRunClient produces a misleading
+		// "Provider produced inconsistent final plan" error during apply-time
+		// re-plan when the saved plan had a known projection. Other client setup
+		// errors keep the existing silent fall-through to preserve compatibility
+		// with paths that depend on it (e.g., drift detection where dry-run
+		// validation fails on the now-divergent live object).
+		if k8serrors.IsAuthError(err) || k8serrors.IsConnectionError(err) {
+			resourceDesc := fmt.Sprintf("%s/%s %s/%s",
+				desiredObj.GetAPIVersion(), desiredObj.GetKind(),
+				desiredObj.GetNamespace(), desiredObj.GetName())
+			r.addClassifiedError(&resp.Diagnostics, err, "Plan", resourceDesc, desiredObj.GetAPIVersion())
+		}
 		return false, nil
 	}
 
@@ -316,13 +321,12 @@ func (r *objectResource) executeDryRunAndProjection(ctx context.Context, req res
 				"CRD not found during dry-run: projection will be calculated during apply")
 			return true, nil
 		}
-		// performDryRun already added diagnostics for field-validation and
-		// immutable-field errors. For other errors (auth, network, RBAC, etc.)
-		// it called setProjectionUnknown without a diagnostic, which produces
-		// a "Provider produced inconsistent final plan" error during apply-time
-		// re-plan when the saved plan had a known projection. Surface the real
-		// cause so terraform fails with an actionable error.
-		if !resp.Diagnostics.HasError() {
+		// Surface auth/connection failures explicitly (see comment above). Other
+		// dry-run errors (validation, conflicts) keep the silent fall-through so
+		// drift-detection flows still work — when the live object diverges from
+		// the desired yaml in a way that breaks SSA validation, projection
+		// becomes "(known after apply)" and plan can still proceed.
+		if !resp.Diagnostics.HasError() && (k8serrors.IsAuthError(err) || k8serrors.IsConnectionError(err)) {
 			resourceDesc := fmt.Sprintf("%s/%s %s/%s",
 				desiredObj.GetAPIVersion(), desiredObj.GetKind(),
 				desiredObj.GetNamespace(), desiredObj.GetName())
