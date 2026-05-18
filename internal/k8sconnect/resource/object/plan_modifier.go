@@ -293,6 +293,15 @@ func (r *objectResource) executeDryRunAndProjection(ctx context.Context, req res
 				"CRD not found during plan: projection will be calculated during apply")
 			return true, nil
 		}
+		// Surface the underlying client setup error (auth, network, invalid
+		// connection config) so terraform fails the run with the real cause.
+		// Without this, setupDryRunClient's silent setProjectionUnknown produces
+		// a "Provider produced inconsistent final plan" error during apply-time
+		// re-plan when the saved plan had a known projection.
+		resourceDesc := fmt.Sprintf("%s/%s %s/%s",
+			desiredObj.GetAPIVersion(), desiredObj.GetKind(),
+			desiredObj.GetNamespace(), desiredObj.GetName())
+		r.addClassifiedError(&resp.Diagnostics, err, "Plan", resourceDesc, desiredObj.GetAPIVersion())
 		return false, nil
 	}
 
@@ -306,6 +315,18 @@ func (r *objectResource) executeDryRunAndProjection(ctx context.Context, req res
 			r.setProjectionUnknown(ctx, plannedData, resp,
 				"CRD not found during dry-run: projection will be calculated during apply")
 			return true, nil
+		}
+		// performDryRun already added diagnostics for field-validation and
+		// immutable-field errors. For other errors (auth, network, RBAC, etc.)
+		// it called setProjectionUnknown without a diagnostic, which produces
+		// a "Provider produced inconsistent final plan" error during apply-time
+		// re-plan when the saved plan had a known projection. Surface the real
+		// cause so terraform fails with an actionable error.
+		if !resp.Diagnostics.HasError() {
+			resourceDesc := fmt.Sprintf("%s/%s %s/%s",
+				desiredObj.GetAPIVersion(), desiredObj.GetKind(),
+				desiredObj.GetNamespace(), desiredObj.GetName())
+			r.addClassifiedError(&resp.Diagnostics, err, "Plan", resourceDesc, desiredObj.GetAPIVersion())
 		}
 		return false, nil
 	}
