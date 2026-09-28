@@ -799,33 +799,41 @@ func (r *waitResource) waitForRollout(ctx context.Context, client k8sclient.K8sC
 func (r *waitResource) waitForDeploymentRollout(ctx context.Context, client k8sclient.K8sClient,
 	gvr schema.GroupVersionResource, obj *unstructured.Unstructured, timeout time.Duration) error {
 
-	checkRollout := func(obj *unstructured.Unstructured) (bool, string) {
-		// Check if replicas match
-		replicas, _, _ := unstructured.NestedInt64(obj.Object, "spec", "replicas")
-		readyReplicas, _, _ := unstructured.NestedInt64(obj.Object, "status", "readyReplicas")
-		updatedReplicas, _, _ := unstructured.NestedInt64(obj.Object, "status", "updatedReplicas")
+	return r.waitWithCheck(ctx, client, gvr, obj, deploymentRolloutComplete, "deployment rollout", timeout)
+}
 
-		// Check generation matches observedGeneration
-		generation, _, _ := unstructured.NestedInt64(obj.Object, "metadata", "generation")
-		observedGen, _, _ := unstructured.NestedInt64(obj.Object, "status", "observedGeneration")
-
-		if generation != observedGen {
-			return false, fmt.Sprintf("generation mismatch: %d != %d", generation, observedGen)
-		}
-
-		if replicas == 0 {
-			replicas = 1 // Default if not specified
-		}
-
-		if readyReplicas == replicas && updatedReplicas == replicas {
-			return true, ""
-		}
-
-		return false, fmt.Sprintf("replicas not ready: %d/%d ready, %d/%d updated",
-			readyReplicas, replicas, updatedReplicas, replicas)
+// deploymentRolloutComplete reports whether a Deployment has finished rolling
+// out, using the same rule as `kubectl rollout status`: the controller has
+// observed the current generation, every desired replica is updated, no old
+// replicas remain, and every updated replica is available.
+//
+// Comparing readyReplicas to spec.replicas alone is not enough: during a surge
+// rollout the old pod is still ready while the new one starts, so ready ==
+// spec and updated == spec both hold before the new replica is ready.
+func deploymentRolloutComplete(obj *unstructured.Unstructured) (bool, string) {
+	generation, _, _ := unstructured.NestedInt64(obj.Object, "metadata", "generation")
+	observedGen, _, _ := unstructured.NestedInt64(obj.Object, "status", "observedGeneration")
+	if observedGen < generation {
+		return false, fmt.Sprintf("generation mismatch: %d != %d", generation, observedGen)
 	}
 
-	return r.waitWithCheck(ctx, client, gvr, obj, checkRollout, "deployment rollout", timeout)
+	replicas, hasReplicas, _ := unstructured.NestedInt64(obj.Object, "spec", "replicas")
+	if !hasReplicas {
+		replicas = 1 // Kubernetes default when spec.replicas is omitted
+	}
+	statusReplicas, _, _ := unstructured.NestedInt64(obj.Object, "status", "replicas")
+	updatedReplicas, _, _ := unstructured.NestedInt64(obj.Object, "status", "updatedReplicas")
+	availableReplicas, _, _ := unstructured.NestedInt64(obj.Object, "status", "availableReplicas")
+
+	switch {
+	case updatedReplicas < replicas:
+		return false, fmt.Sprintf("%d of %d updated replicas", updatedReplicas, replicas)
+	case statusReplicas > updatedReplicas:
+		return false, fmt.Sprintf("%d old replicas pending termination", statusReplicas-updatedReplicas)
+	case availableReplicas < updatedReplicas:
+		return false, fmt.Sprintf("%d of %d updated replicas available", availableReplicas, updatedReplicas)
+	}
+	return true, ""
 }
 
 // waitForStatefulSetRollout waits for a StatefulSet to complete its rollout
