@@ -22,7 +22,7 @@ type ManagedFields = fieldmanagement.ManagedFields
 // owned by k8sconnect (from the ADR-021 baseline), and paths present in yaml_body.
 // Fields written by other controllers outside this scope are excluded to prevent
 // "Provider produced inconsistent result after apply" errors when external controllers
-// write unrelated fields between plan and apply (see ADR-024).
+// write unrelated fields between plan and apply (see HED-ADR-001).
 //
 // Status fields and K8s system annotations are filtered within the scope as well
 // (they are excluded regardless of ownership because they change unpredictably).
@@ -72,7 +72,7 @@ func updateManagedFieldsData(ctx context.Context, data *objectResourceModel, cur
 }
 
 // computeRelevantManagedFieldPaths returns the union of paths considered in scope for
-// managed_fields tracking (ADR-024):
+// managed_fields tracking (HED-ADR-001):
 //  1. Paths currently owned by k8sconnect (from the live ownership map)
 //  2. Paths previously owned by k8sconnect (from the ownership_baseline in private state)
 //  3. Paths referenced in the user's yaml_body

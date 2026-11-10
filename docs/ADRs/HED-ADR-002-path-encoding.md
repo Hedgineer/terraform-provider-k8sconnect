@@ -1,8 +1,9 @@
-# ADR-025: Path Encoding for Map Keys Containing Dots
+# HED-ADR-002: Path Encoding for Map Keys Containing Dots
 
 **Status:** Implemented
 **Date:** 2026-04-20
-**Related ADRs:** ADR-001 (Managed State Projection), ADR-020 (Managed Fields Display Strategy), ADR-024 (Managed Fields Relationship Scoping)
+**Formerly:** ADR-025 (renumbered 2026-11-10 so fork ADRs never collide with upstream's numbering)
+**Related ADRs:** ADR-001 (Managed State Projection), ADR-020 (Managed Fields Display Strategy), HED-ADR-001 (Managed Fields Relationship Scoping)
 
 ## Context
 
@@ -112,4 +113,4 @@ Hedgineer context at decision time: two staging clients, no production. Accepted
 ## Related Documentation
 
 - ADR-001: Managed State Projection (overall projection model)
-- ADR-024: Managed Fields Relationship Scoping (separate fix shipped in `hed-v0.3.8-p1`)
+- HED-ADR-001: Managed Fields Relationship Scoping (separate fix shipped in `hed-v0.3.8-p1`)

@@ -43,7 +43,7 @@ func extractOwnedPaths(ctx context.Context, managedFields []metav1.ManagedFields
 	// Apply/Update but are NOT present in the dry-run object at plan time, so
 	// including them in the projection path list would cause "new element"
 	// inconsistencies between plan-time and apply-time managed_state_projection.
-	// (Pre-ADR-025 this was masked by a separate bug in getFieldByPath that silently
+	// (Pre-HED-ADR-002 this was masked by a separate bug in getFieldByPath that silently
 	// dropped dotted keys — the filter in fieldmanagement/ownership.go used the
 	// unencoded prefix and only happened to work for the managed_fields path.)
 	filteredPaths := paths[:0]
@@ -746,7 +746,7 @@ func navigateToPath(obj map[string]interface{}, path string) (interface{}, bool)
 // Pattern matches if it's a prefix of the path (allowing parent fields to ignore children).
 // Supports JSONPath predicates: containers[?(@.name=='nginx')].image.
 //
-// Back-compat (ADR-025): user patterns may be written with unescaped dots
+// Back-compat (HED-ADR-002): user patterns may be written with unescaped dots
 // even when a key itself contains dots — e.g. `metadata.annotations.app.kubernetes.io/name`
 // where `app.kubernetes.io/name` is a single annotation key. The matcher falls back
 // to joining consecutive pattern segments with "." to match a single encoded path

@@ -140,7 +140,7 @@ func (r *objectResource) Schema(ctx context.Context, req resource.SchemaRequest,
 				ElementType: types.StringType,
 				Description: "Tracks which field manager owns each field path k8sconnect has a relationship with. " +
 					"Shows 'k8sconnect' for fields managed by this provider, or external manager names (e.g., 'kubectl', 'hpa-controller') for fields managed by other systems. " +
-					"Scope (ADR-024): fields currently owned by k8sconnect, fields previously owned by k8sconnect (per the last-applied baseline), and fields referenced in yaml_body. " +
+					"Scope (HED-ADR-001): fields currently owned by k8sconnect, fields previously owned by k8sconnect (per the last-applied baseline), and fields referenced in yaml_body. " +
 					"Fields written by other controllers to paths outside yaml_body are NOT tracked — tracking them produced spurious 'inconsistent result' errors when controllers wrote unrelated fields between plan and apply. " +
 					"When ownership changes appear in diffs, it indicates another system has taken control of fields you are (or were) managing. " +
 					"Use ignore_fields to delegate field management to external controllers and stop tracking their ownership.",

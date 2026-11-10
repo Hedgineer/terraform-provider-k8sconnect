@@ -62,7 +62,7 @@ func TestGetFieldValue_DottedKeys(t *testing.T) {
 			wantVal: "ConfigMap",
 		},
 
-		// Keys with dots - ADR-025 encoded path contract.
+		// Keys with dots - HED-ADR-002 encoded path contract.
 		// Callers pass already-encoded paths; dotted keys are quote-wrapped.
 		{
 			name:    "ConfigMap data key with dot",

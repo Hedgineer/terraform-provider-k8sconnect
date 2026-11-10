@@ -2,7 +2,7 @@ package fieldmanagement
 
 import "strings"
 
-// Path encoding (ADR-025): Kubernetes map keys can contain '.' (e.g. ConfigMap data
+// Path encoding (HED-ADR-002): Kubernetes map keys can contain '.' (e.g. ConfigMap data
 // keys like "config.yaml", annotation keys like "app.kubernetes.io/name", ArgoCD
 // config-map keys like "resource.customizations.ignoreDifferences.<group>_<kind>").
 //

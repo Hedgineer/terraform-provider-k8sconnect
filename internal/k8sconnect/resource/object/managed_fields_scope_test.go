@@ -26,7 +26,7 @@ func buildFieldsV1(t *testing.T, fields map[string]interface{}) []byte {
 // TestComputeRelevantManagedFieldPaths_ExcludesUnrelatedExternalPaths verifies
 // that when an external manager owns a path k8sconnect has never referenced
 // (not in yaml_body, not currently owned by k8sconnect, not in baseline), the
-// path is NOT considered relevant. This is the core ADR-024 guarantee that
+// path is NOT considered relevant. This is the core HED-ADR-001 guarantee that
 // prevents "Provider produced inconsistent result after apply" errors when
 // controllers like ArgoCD write `operation.*` on an Application CR between
 // our plan and apply.

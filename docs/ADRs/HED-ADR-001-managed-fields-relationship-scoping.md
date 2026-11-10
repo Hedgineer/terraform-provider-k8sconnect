@@ -1,7 +1,8 @@
-# ADR-024: Managed Fields Relationship Scoping
+# HED-ADR-001: Managed Fields Relationship Scoping
 
 **Status:** Implemented
 **Date:** 2026-04-16
+**Formerly:** ADR-024 (renumbered 2026-11-10 so fork ADRs never collide with upstream's numbering)
 **Related ADRs:** ADR-005 (Managed Fields Strategy), ADR-020 (Managed Fields Display Strategy), ADR-021 (Ownership Transition Messaging)
 
 ## Context

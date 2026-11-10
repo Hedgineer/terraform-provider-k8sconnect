@@ -1,8 +1,9 @@
-# ADR-026: Preserve-YAMLBody Drift Guard Requires yaml_body Equality
+# HED-ADR-003: Preserve-YAMLBody Drift Guard Requires yaml_body Equality
 
 **Status:** Implemented
 **Date:** 2026-04-22
-**Related ADRs:** ADR-001 (Managed State Projection), ADR-024 (Managed Fields Relationship Scoping)
+**Formerly:** ADR-026 (renumbered 2026-11-10 so fork ADRs never collide with upstream's numbering)
+**Related ADRs:** ADR-001 (Managed State Projection), HED-ADR-001 (Managed Fields Relationship Scoping)
 
 ## Context
 
@@ -12,7 +13,7 @@ unchanged. The heuristic: if the projection's values haven't changed, the
 user-visible effect on Kubernetes is zero, so overwrite `plannedData.YAMLBody`
 with `stateData.YAMLBody` to avoid showing a pointless diff.
 
-The pre-ADR-026 condition was:
+The pre-HED-ADR-003 condition was:
 
 ```go
 if baselineProjection.Equal(plannedData.ManagedStateProjection) {
@@ -84,9 +85,9 @@ harmful way. The bug only fires when a user imports and expects to converge
 the resource to a *narrower* user config — exactly what client-jhc's staging
 deploy was doing.
 
-It appeared to surface only after ADR-024 (`managed_fields` scoping, shipped
+It appeared to surface only after HED-ADR-001 (`managed_fields` scoping, shipped
 in `hed-v0.3.8-p1`), which made the scope mismatch between plan and apply
-louder. The actual underlying bug predates ADR-024 by a wide margin.
+louder. The actual underlying bug predates HED-ADR-001 by a wide margin.
 
 ## Decision
 
@@ -150,7 +151,7 @@ preservation logic and is now correctly handled.
   long-term direction is to have import store a narrower yaml_body, or to
   prompt users to edit their config to match the imported shape. Deferred
   to a follow-up ADR.
-- This does not change ADR-024's `managed_fields` scoping. ADR-024 continues
+- This does not change HED-ADR-001's `managed_fields` scoping. HED-ADR-001 continues
   to filter managed_fields to (owned ∪ baseline ∪ yaml_body). The scope
   check (1) "currently owned by k8sconnect" was suspected during triage
   but was not the cause; it still evaluates consistently between plan and
@@ -167,5 +168,5 @@ framework's "new element has appeared" error; post-fix it converges.
 ## Related Documentation
 
 - ADR-001: Managed State Projection (what the projection is)
-- ADR-024: Managed Fields Relationship Scoping (what scoping ADR-024 adds)
+- HED-ADR-001: Managed Fields Relationship Scoping (what scoping HED-ADR-001 adds)
 - PR: `hed-v0.3.8-p3` release notes
