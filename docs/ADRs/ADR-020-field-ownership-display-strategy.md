@@ -1,11 +1,11 @@
 # ADR-020: Managed Fields Display Strategy
 
-**Status:** Implemented (scope refined by ADR-024)
+**Status:** Implemented (scope refined by HED-ADR-001)
 **Date:** 2025-10-26
 **Last Updated:** 2026-04-16
-**Related ADRs:** ADR-005 (Managed Fields Strategy), ADR-021 (Ownership Transition Messaging), ADR-024 (Managed Fields Relationship Scoping)
+**Related ADRs:** ADR-005 (Managed Fields Strategy), ADR-021 (Ownership Transition Messaging), HED-ADR-001 (Managed Fields Relationship Scoping)
 
-> **Note (2026-04-16):** The "bounded by managed_state_projection" framing in this ADR was not reflected in the initial implementation, which instead tracked ownership for every field manager on the object. That broader scope caused "Provider produced inconsistent result after apply" errors when external controllers wrote foreign paths between plan and apply (e.g., ArgoCD's `argocd-application-controller` writing `operation.*` on an `Application`). **ADR-024** formalizes the correct scope: the union of paths currently owned by k8sconnect, paths previously owned by k8sconnect (per the ADR-021 baseline), and paths in `yaml_body`. Status and system-annotation filters still apply within that scope.
+> **Note (2026-04-16):** The "bounded by managed_state_projection" framing in this ADR was not reflected in the initial implementation, which instead tracked ownership for every field manager on the object. That broader scope caused "Provider produced inconsistent result after apply" errors when external controllers wrote foreign paths between plan and apply (e.g., ArgoCD's `argocd-application-controller` writing `operation.*` on an `Application`). **HED-ADR-001** formalizes the correct scope: the union of paths currently owned by k8sconnect, paths previously owned by k8sconnect (per the ADR-021 baseline), and paths in `yaml_body`. Status and system-annotation filters still apply within that scope.
 
 ## Context
 

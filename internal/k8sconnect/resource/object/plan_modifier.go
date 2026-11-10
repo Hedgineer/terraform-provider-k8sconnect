@@ -196,7 +196,7 @@ func (r *objectResource) checkDriftAndPreserveState(ctx context.Context, req res
 			// take ownership of all server-set defaults, and produce a projection
 			// with more keys than the plan predicted — tripping the framework's
 			// consistency check ("new element has appeared") on every default
-			// field (spec.clusterIP, spec.sessionAffinity, etc.). See ADR-026.
+			// field (spec.clusterIP, spec.sessionAffinity, etc.). See HED-ADR-003.
 			//
 			// We compare FIELD SETS rather than raw text so cosmetic changes
 			// (whitespace, ordering, quote style) still qualify for preservation,
@@ -238,7 +238,7 @@ func (r *objectResource) checkDriftAndPreserveState(ctx context.Context, req res
 // set of field paths, ignoring value differences and purely cosmetic changes
 // (whitespace, ordering, quoting).
 //
-// ADR-026: used to decide whether checkDriftAndPreserveState can safely
+// HED-ADR-003: used to decide whether checkDriftAndPreserveState can safely
 // preserve state's yaml_body. A cosmetic change produces identical field sets
 // (safe to preserve). A post-import bloated yaml_body contains fields the
 // user's config doesn't, producing a larger field set (not safe to preserve —
@@ -461,7 +461,7 @@ func (r *objectResource) calculateProjection(ctx context.Context, req resource.M
 
 	// Apply projection from dry-run result. Read ownership_baseline from private state
 	// (ADR-021) so applyProjection can scope managed_fields to paths k8sconnect has a
-	// relationship with (ADR-024).
+	// relationship with (HED-ADR-001).
 	baseline := readOwnershipBaseline(ctx, req.Private)
 	return r.applyProjection(ctx, dryRunResult, paths, plannedData, isCreate, baseline, resp), refreshedProjection
 }
@@ -550,7 +550,7 @@ func (r *objectResource) performDryRun(ctx context.Context, client k8sclient.K8s
 // applyProjection projects fields and updates plan. baseline is the previous ownership
 // baseline from private state (ADR-021); used (together with yaml_body and the live
 // ownership map) to scope managed_fields to fields k8sconnect actually has a relationship
-// with (ADR-024).
+// with (HED-ADR-001).
 func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unstructured.Unstructured, paths []string, plannedData *objectResourceModel, isCreate bool, baseline map[string]string, resp *resource.ModifyPlanResponse) bool {
 	// Apply ignore_fields filtering if specified
 	if ignoreFields := getIgnoreFields(ctx, plannedData); ignoreFields != nil {
@@ -667,7 +667,7 @@ func (r *objectResource) applyProjection(ctx context.Context, dryRunResult *unst
 			})
 		}
 
-		// Scope managed_fields to paths k8sconnect has a relationship with (ADR-024):
+		// Scope managed_fields to paths k8sconnect has a relationship with (HED-ADR-001):
 		// (1) currently owned by k8sconnect, (2) previously owned by k8sconnect per the
 		// baseline, or (3) present in the user's yaml_body. Paths outside this scope are
 		// foreign-controller internals; tracking them produces noise and "Provider produced
@@ -1038,7 +1038,7 @@ func stringSliceContains(slice []string, value string) bool {
 }
 
 // getFieldValue extracts a field value from an unstructured object using an
-// encoded path (ADR-025). Keys containing '.' are quote-wrapped in the path
+// encoded path (HED-ADR-002). Keys containing '.' are quote-wrapped in the path
 // (e.g. `data."config.yaml"`), so navigation is deterministic — no greedy
 // fallback needed.
 func getFieldValue(obj *unstructured.Unstructured, fieldPath string) interface{} {

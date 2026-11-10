@@ -44,7 +44,7 @@ func ConvertToAttrValue(ctx context.Context, data interface{}) (attr.Value, erro
 		return objValue, nil
 
 	case []interface{}:
-		// Convert slice to types.List
+		// Convert slice to types.List, or types.Tuple when element types differ
 		if len(v) == 0 {
 			// Empty list - default to string type
 			return types.ListNull(types.StringType), nil
@@ -52,7 +52,8 @@ func ConvertToAttrValue(ctx context.Context, data interface{}) (attr.Value, erro
 
 		// Convert all elements
 		elements := make([]attr.Value, len(v))
-		var elemType attr.Type
+		elemTypes := make([]attr.Type, len(v))
+		sameType := true
 
 		for i, elem := range v {
 			elemVal, err := ConvertToAttrValue(ctx, elem)
@@ -60,18 +61,30 @@ func ConvertToAttrValue(ctx context.Context, data interface{}) (attr.Value, erro
 				return nil, fmt.Errorf("failed to convert list element %d: %w", i, err)
 			}
 			elements[i] = elemVal
-
-			// Use first element's type as list element type
-			if i == 0 {
-				elemType = elemVal.Type(ctx)
+			elemTypes[i] = elemVal.Type(ctx)
+			if !elemTypes[i].Equal(elemTypes[0]) {
+				sameType = false
 			}
 		}
 
-		listValue, diags := types.ListValue(elemType, elements)
-		if diags.HasError() {
-			return nil, fmt.Errorf("failed to create list: %s", diags.Errors())
+		if sameType {
+			listValue, diags := types.ListValue(elemTypes[0], elements)
+			if diags.HasError() {
+				return nil, fmt.Errorf("failed to create list: %s", diags.Errors())
+			}
+			return listValue, nil
 		}
-		return listValue, nil
+
+		// Kubernetes arrays often mix element shapes: env entries with value
+		// or valueFrom, tolerations with or without key, volumes of different
+		// sources. A List needs a single element type, so use a Tuple, which
+		// types each element separately. Indexing, length(), for expressions
+		// and splats work the same on both.
+		tupleValue, diags := types.TupleValue(elemTypes, elements)
+		if diags.HasError() {
+			return nil, fmt.Errorf("failed to create tuple: %s", diags.Errors())
+		}
+		return tupleValue, nil
 
 	case string:
 		return types.StringValue(v), nil

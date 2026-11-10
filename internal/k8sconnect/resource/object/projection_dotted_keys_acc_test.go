@@ -17,7 +17,7 @@ import (
 )
 
 // TestAccObjectResource_DottedKeysInConfigMapData is the regression test for
-// ADR-025 (path encoding). Reproduces the ArgoCD `argocd-cm` patch pattern:
+// HED-ADR-002 (path encoding). Reproduces the ArgoCD `argocd-cm` patch pattern:
 // ConfigMap data keys contain dots (e.g. `resource.customizations.ignoreDifferences.*`,
 // `ui.bannercontent`). Before the fix, projectFields' path-splitter treated the
 // dots as nesting separators and silently dropped the entries, collapsing drift

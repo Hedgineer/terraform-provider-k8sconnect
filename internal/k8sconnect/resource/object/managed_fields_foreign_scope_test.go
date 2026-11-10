@@ -23,12 +23,12 @@ import (
 // after apply" errors: an external controller writes a spec-level field that
 // is NOT in our yaml_body and that we have never owned.
 //
-// Before ADR-024 scoping, managed_fields tracked every field manager on the
+// Before HED-ADR-001 scoping, managed_fields tracked every field manager on the
 // object — so the foreign path would show up in the post-apply managed_fields
 // but not in the plan's prediction, causing Terraform's framework to fail the
 // apply.
 //
-// With ADR-024 scoping, fields outside (yaml_body ∪ k8sconnect-owned ∪
+// With HED-ADR-001 scoping, fields outside (yaml_body ∪ k8sconnect-owned ∪
 // baseline-owned) are excluded from managed_fields, so the foreign path never
 // enters the attribute and the apply succeeds.
 //
@@ -97,7 +97,7 @@ YAML
 			// Step 2: A foreign controller SSA-writes a key that is NOT in our
 			// yaml_body. This simulates the ArgoCD controller writing
 			// operation.* on an Application. Then re-apply — which before
-			// ADR-024 would fail with "Provider produced inconsistent result
+			// HED-ADR-001 would fail with "Provider produced inconsistent result
 			// after apply" because the foreign path appears in managed_fields
 			// post-apply but not in the plan's prediction.
 			{

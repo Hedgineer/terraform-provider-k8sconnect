@@ -6,11 +6,11 @@ import (
 	"testing"
 )
 
-// TestExtractFieldPaths_QuotesDottedKeys is ADR-025's core contract check: when a
+// TestExtractFieldPaths_QuotesDottedKeys is HED-ADR-002's core contract check: when a
 // map key contains '.', the emitted path wraps that key in quotes. ConfigMap data
 // keys like the ArgoCD `resource.customizations.ignoreDifferences.*` family MUST
 // become `data."resource.customizations..."`, not `data.resource.customizations...`.
-// The latter format is ambiguous and caused the drift-detection collapse (see ADR-025).
+// The latter format is ambiguous and caused the drift-detection collapse (see HED-ADR-002).
 func TestExtractFieldPaths_QuotesDottedKeys(t *testing.T) {
 	obj := map[string]interface{}{
 		"apiVersion": "v1",
@@ -53,7 +53,7 @@ func TestExtractFieldPaths_QuotesDottedKeys(t *testing.T) {
 
 // TestProjectFields_RoundTripForDottedKeys verifies the full projection path
 // (extract -> project -> flatten) preserves values for ConfigMap data keys that
-// contain dots. Before ADR-025, projectFields' `getFieldByPath` dropped these
+// contain dots. Before HED-ADR-002, projectFields' `getFieldByPath` dropped these
 // silently, collapsing drift comparison to "no change" (the ArgoCD bug).
 func TestProjectFields_RoundTripForDottedKeys(t *testing.T) {
 	source := map[string]interface{}{

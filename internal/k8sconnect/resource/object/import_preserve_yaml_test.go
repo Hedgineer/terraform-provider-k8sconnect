@@ -18,7 +18,7 @@ import (
 
 // TestAccObjectResource_ImportPreservesUserYAMLBody is the regression guard for
 // the reimport-then-apply bug that broke client-jhc's staging deploys on
-// hed-v0.3.8-p2. See ADR-026 for the full incident write-up.
+// hed-v0.3.8-p2. See HED-ADR-003 for the full incident write-up.
 //
 // Mechanism:
 //   - Import serializes the entire live Kubernetes object (including every

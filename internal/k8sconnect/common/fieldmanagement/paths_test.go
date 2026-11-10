@@ -82,7 +82,7 @@ func TestIsK8sconnectInternalAnnotationPath(t *testing.T) {
 		path string
 		want bool
 	}{
-		// Canonical encoded form — the only form producers emit post-ADR-025.
+		// Canonical encoded form — the only form producers emit post-HED-ADR-002.
 		{`metadata.annotations."k8sconnect.terraform.io/terraform-id"`, true},
 		{`metadata.annotations."k8sconnect.terraform.io/created-at"`, true},
 		// Unrelated annotations and paths must not match.
