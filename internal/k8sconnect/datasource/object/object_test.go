@@ -125,3 +125,135 @@ output "test_data_key1" {
 }
 `, ns, name, ns)
 }
+
+// Kubernetes arrays often mix element shapes. Here the container env has one
+// entry with value and one with valueFrom, which cannot share a list element
+// type. Reading such an object used to fail with "Value Conversion Error".
+func TestAccObjectDataSource_mixedShapeList(t *testing.T) {
+	t.Parallel()
+
+	raw := os.Getenv("TF_ACC_KUBECONFIG")
+	if raw == "" {
+		t.Fatal("TF_ACC_KUBECONFIG must be set")
+	}
+
+	ns := fmt.Sprintf("ds-mixed-%d", time.Now().UnixNano()%1000000)
+	deployName := fmt.Sprintf("mixed-%d", time.Now().UnixNano()%1000000)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: map[string]func() (tfprotov6.ProviderServer, error){
+			"k8sconnect": providerserver.NewProtocol6WithError(k8sconnect.New()),
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: testAccObjectDataSourceMixedShapeConfig(ns, deployName),
+				ConfigVariables: config.Variables{
+					"raw":       config.StringVariable(raw),
+					"namespace": config.StringVariable(ns),
+					"name":      config.StringVariable(deployName),
+				},
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("data.k8sconnect_object.test", "kind", "Deployment"),
+					resource.TestCheckOutput("env_count", "2"),
+					resource.TestCheckOutput("env0_value", "1"),
+					resource.TestCheckOutput("env1_field_path", "metadata.name"),
+				),
+			},
+		},
+	})
+}
+
+func testAccObjectDataSourceMixedShapeConfig(ns, name string) string {
+	return fmt.Sprintf(`
+variable "raw" {
+  type = string
+}
+variable "namespace" {
+  type = string
+}
+variable "name" {
+  type = string
+}
+
+provider "k8sconnect" {}
+
+resource "k8sconnect_object" "namespace" {
+  yaml_body = <<YAML
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+YAML
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+}
+
+# replicas: 0 so no pods are scheduled and no image is pulled
+resource "k8sconnect_object" "test" {
+  yaml_body = <<YAML
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: mixed
+  template:
+    metadata:
+      labels:
+        app: mixed
+    spec:
+      containers:
+      - name: app
+        image: registry.k8s.io/pause:3.9
+        env:
+        - name: PLAIN
+          value: "1"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+YAML
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+
+  depends_on = [k8sconnect_object.namespace]
+}
+
+data "k8sconnect_object" "test" {
+  api_version = "apps/v1"
+  kind        = "Deployment"
+  name        = var.name
+  namespace   = var.namespace
+
+  cluster = {
+    kubeconfig = var.raw
+  }
+
+  depends_on = [k8sconnect_object.test]
+}
+
+locals {
+  env = data.k8sconnect_object.test.object.spec.template.spec.containers[0].env
+}
+
+output "env_count" {
+  value = tostring(length(local.env))
+}
+
+output "env0_value" {
+  value = local.env[0].value
+}
+
+output "env1_field_path" {
+  value = local.env[1].valueFrom.fieldRef.fieldPath
+}
+`, ns, name, ns)
+}
