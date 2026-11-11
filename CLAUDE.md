@@ -41,7 +41,7 @@ Squash-merging means upstream is **not** an ancestor of `main`. The rebased patc
 | Patch stack top | 2c845b8 = `refs/pull/3/head^1` |
 | Squash commit on `main` | ce68b21 |
 
-Recipe:
+Recipe (the SHAs and PR number come from the table):
 
 ```bash
 git fetch upstream --tags            # our tags are hed-v*, so upstream's v* tags can't collide
@@ -116,16 +116,18 @@ provider_installation {
 }
 ```
 
-Then in module code:
+Roots pin an exact version:
 
 ```hcl
 required_providers {
   k8sconnect = {
     source  = "hedgineer/k8sconnect"
-    version = ">= 0.3.100"
+    version = "0.3.100"
   }
 }
 ```
+
+Modules state a minimum only, e.g. `version = ">= 0.3.9-p1"`. Raise a module's minimum only after every client's proxy map grants that version.
 
 ## CI/CD
 
@@ -149,10 +151,10 @@ Tags are `hed-v<version>` (e.g. `hed-v0.3.100` publishes OCI tag `0.3.100`). Ups
 Always pass `--target` with a full commit SHA. The workflow builds whatever commit the tag points at, and without `--target` the tag lands on the current tip of `main`, which breaks "final on the same commit as the rc".
 
 ```bash
-SHA=$(git rev-parse origin/main)
-gh release create hed-v0.3.101-rc.1 --target "$SHA" --prerelease --generate-notes
-# after the rc is proven on staging:
-gh release create hed-v0.3.101 --target "$SHA" --generate-notes
+gh release create hed-v0.3.101-rc.1 --target "$(git rev-parse origin/main)" --prerelease --generate-notes
+# after the rc is proven on staging, release the rc's commit, not the current main:
+git fetch origin --tags
+gh release create hed-v0.3.101 --target "$(git rev-parse 'hed-v0.3.101-rc.1^{commit}')" --generate-notes
 ```
 
 This creates the tag + release on GitHub, which triggers `hedgineer-release.yml` → `go build` → `oras` push to ACR.
